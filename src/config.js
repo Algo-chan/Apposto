@@ -1,4 +1,50 @@
 // All settings come from environment variables (.env file). See .env.example.
+import { createPrivateKey } from 'node:crypto';
+
+/**
+ * Hosting dashboards often mangle PEM values: newlines become spaces or literal "\n",
+ * values get wrapped in quotes, or the whole thing arrives base64-encoded.
+ * Rebuild a clean PEM (header + 64-char lines + footer) from whatever we got.
+ */
+export function normalizePrivateKey(raw) {
+  if (!raw) return '';
+  let key = String(raw).trim();
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+  key = key.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n');
+  const match = key.match(/-----BEGIN ([A-Z0-9 ]+)-----([\s\S]*?)-----END \1-----/);
+  if (!match) return key;
+  const body = match[2].replace(/[^A-Za-z0-9+/=]/g, '');
+  const lines = body.match(/.{1,64}/g) || [];
+  return `-----BEGIN ${match[1]}-----\n${lines.join('\n')}\n-----END ${match[1]}-----\n`;
+}
+
+/** GOOGLE_CREDENTIALS_BASE64 may contain the whole google-key.json (easiest) or just the PEM key. */
+function decodeCredentialsBase64(raw) {
+  if (!raw) return null;
+  let encoded = String(raw).trim();
+  if (
+    (encoded.startsWith('"') && encoded.endsWith('"')) ||
+    (encoded.startsWith("'") && encoded.endsWith("'"))
+  ) {
+    encoded = encoded.slice(1, -1).trim();
+  }
+  const text = Buffer.from(encoded, 'base64').toString('utf8').trim();
+  if (!text) return null;
+  if (text.startsWith('{')) {
+    try {
+      const json = JSON.parse(text);
+      return { email: json.client_email || '', key: json.private_key || '' };
+    } catch {
+      return null;
+    }
+  }
+  return { email: '', key: text };
+}
 
 function num(env, name, def) {
   const v = env[name];
@@ -17,13 +63,14 @@ function idList(env, name) {
 
 export function loadConfig(env = process.env) {
   const storage = (env.STORAGE || 'sheets').toLowerCase();
+  const fromBase64 = decodeCredentialsBase64(env.GOOGLE_CREDENTIALS_BASE64);
   const config = {
     botToken: env.BOT_TOKEN || '',
     storage,
     sheetId: env.GOOGLE_SHEET_ID || '',
     googleCredentialsFile: env.GOOGLE_CREDENTIALS_FILE || '',
-    googleClientEmail: env.GOOGLE_CLIENT_EMAIL || '',
-    googlePrivateKey: (env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+    googleClientEmail: env.GOOGLE_CLIENT_EMAIL || fromBase64?.email || '',
+    googlePrivateKey: normalizePrivateKey(fromBase64?.key || env.GOOGLE_PRIVATE_KEY || ''),
 
     // Telegram group where riders + you see jobs. Get the id with /myid inside the group.
     dispatchChatId: env.DISPATCH_CHAT_ID || '',
@@ -58,7 +105,19 @@ export function loadConfig(env = process.env) {
   if (storage === 'sheets') {
     if (!config.sheetId) problems.push('GOOGLE_SHEET_ID is missing');
     if (!config.googleCredentialsFile && !(config.googleClientEmail && config.googlePrivateKey)) {
-      problems.push('Set GOOGLE_CREDENTIALS_FILE (or GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY)');
+      problems.push(
+        'Set GOOGLE_CREDENTIALS_FILE (or GOOGLE_CREDENTIALS_BASE64, or GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY)'
+      );
+    }
+    if (config.googlePrivateKey) {
+      try {
+        createPrivateKey(config.googlePrivateKey);
+      } catch {
+        problems.push(
+          'The Google private key is not valid PEM (often a truncated/quoted value on hosting dashboards). ' +
+            'On Render, set GOOGLE_CREDENTIALS_BASE64 to the base64 of google-key.json — see DEPLOY.md'
+        );
+      }
     }
   }
   if (!config.dispatchChatId) {
