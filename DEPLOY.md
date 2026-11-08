@@ -70,29 +70,47 @@ Add the environment variables below under **Environment**.
 | `BOT_TOKEN` | yes | Token from @BotFather |
 | `STORAGE` | yes | `sheets` |
 | `GOOGLE_SHEET_ID` | yes | The id from the sheet URL (`/d/THIS_PART/edit`) |
-| `GOOGLE_CLIENT_EMAIL` | yes | `client_email` from `google-key.json` |
-| `GOOGLE_PRIVATE_KEY` | yes | `private_key` from `google-key.json` (see below) |
+| `GOOGLE_CLIENT_EMAIL` | recommended | `client_email` from `google-key.json` (auto-read from the base64 JSON too) |
+| `GOOGLE_CREDENTIALS_BASE64` | yes on Render | Base64 of the whole `google-key.json` (recommended — see below) |
+| `GOOGLE_PRIVATE_KEY` | alternative | `private_key` PEM; only if you keep its newlines (see below) |
 | `DISPATCH_CHAT_ID` | yes for riders | Group chat id, starts with `-100` (get it with `/myid` in the group) |
 | `ADMIN_IDS` | yes for admin commands | Your Telegram id, comma-separated (`123,456`) |
 | `SUPPORT_PHONE` | recommended | Phone shown to customers |
 | `BRAND_NAME` | optional | Default: `Delivery` |
 
 **Do not set `GOOGLE_CREDENTIALS_FILE`** on Render — there is no `google-key.json` in the repo.
-`GOOGLE_CLIENT_EMAIL` + `GOOGLE_PRIVATE_KEY` replace it.
+Use `GOOGLE_CREDENTIALS_BASE64` instead.
 
-### `GOOGLE_PRIVATE_KEY`
+### `GOOGLE_CREDENTIALS_BASE64` (recommended)
 
-Open `google-key.json` and copy the **whole** `private_key` value, including:
+Dashboard env-var fields often destroy PEM newlines, which causes
+`error:1E08010C:DECODER routines::unsupported`. Base64 is a single safe line:
 
+**Windows PowerShell**
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("google-key.json"))
 ```
------BEGIN PRIVATE KEY-----
-...several lines...
------END PRIVATE KEY-----
+
+**macOS / Linux**
+```bash
+base64 -w0 google-key.json
 ```
 
-Paste it into the Render env var. Render accepts multiline values. If your dashboard/editor turns
-it into a single line with `\n` escapes, that is also fine — the app converts `\n` back to real
-newlines on startup.
+**Any OS (Node)**
+```bash
+node -e "process.stdout.write(require('fs').readFileSync('google-key.json').toString('base64'))"
+```
+
+Copy the output into `GOOGLE_CREDENTIALS_BASE64`. The app decodes it, reads `client_email` and
+`private_key`, and derives `GOOGLE_CLIENT_EMAIL` automatically if you leave that var empty.
+Treat this value as a secret.
+
+### `GOOGLE_PRIVATE_KEY` (alternative)
+
+If you prefer not to use base64, paste the **whole** `private_key` value including the
+`-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----` lines. The app normalizes literal
+`\n`, spaces, and surrounding quotes, but a truncated value cannot be recovered. When in doubt,
+use `GOOGLE_CREDENTIALS_BASE64`.
 
 Optional pricing/ETA settings (`DELIVERY_FEE_BASE`, `MAX_KM`, `SERVICE_FEE`, etc.) have code
 defaults; add them only if you want to change the defaults (README section 5).
@@ -152,7 +170,7 @@ to change.
 | Symptom | Fix |
 |---|---|
 | `Missing tab "Merchants" in the spreadsheet` | Run `npm run setup-sheet` locally against the same `GOOGLE_SHEET_ID` |
-| `GOOGLE_PRIVATE_KEY` / `DECODER routines::unsupported` | Key was truncated or quotes were included; paste the full key without surrounding quotes |
+| `DECODER routines::unsupported` / `ERR_OSSL_UNSUPPORTED` | The private key lost its newlines or was truncated. Remove `GOOGLE_PRIVATE_KEY` and set `GOOGLE_CREDENTIALS_BASE64` (above); the app logs a clear config error instead of crashing |
 | `409 Conflict: terminated by other getUpdates request` | Another copy is polling with the same token; stop your local bot |
 | Deploy fails health check | The app must bind `$PORT`; keep the health server code in `src/index.js` and use `npm start` |
 | Bot does nothing, logs fine | Check `BOT_TOKEN`, then send `/myid`; make sure the bot is not blocked |
