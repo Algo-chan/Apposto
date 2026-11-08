@@ -63,14 +63,30 @@ function idList(env, name) {
 
 export function loadConfig(env = process.env) {
   const storage = (env.STORAGE || 'sheets').toLowerCase();
-  const fromBase64 = decodeCredentialsBase64(env.GOOGLE_CREDENTIALS_BASE64);
+  const hasBase64 = Boolean(
+    env.GOOGLE_CREDENTIALS_BASE64 && String(env.GOOGLE_CREDENTIALS_BASE64).trim()
+  );
+  const fromBase64 = hasBase64 ? decodeCredentialsBase64(env.GOOGLE_CREDENTIALS_BASE64) : null;
+  const credentialsSource = env.GOOGLE_CREDENTIALS_FILE
+    ? 'GOOGLE_CREDENTIALS_FILE'
+    : hasBase64
+      ? 'GOOGLE_CREDENTIALS_BASE64'
+      : env.GOOGLE_PRIVATE_KEY
+        ? 'GOOGLE_PRIVATE_KEY'
+        : 'none';
   const config = {
     botToken: env.BOT_TOKEN || '',
     storage,
     sheetId: env.GOOGLE_SHEET_ID || '',
     googleCredentialsFile: env.GOOGLE_CREDENTIALS_FILE || '',
+    googleCredentialsSource: credentialsSource,
+    googleCredentialsBase64Set: hasBase64,
+    googleCredentialsBase64Decoded: Boolean(fromBase64),
     googleClientEmail: env.GOOGLE_CLIENT_EMAIL || fromBase64?.email || '',
-    googlePrivateKey: normalizePrivateKey(fromBase64?.key || env.GOOGLE_PRIVATE_KEY || ''),
+    // When both are present, a valid base64 value wins over a mangled GOOGLE_PRIVATE_KEY.
+    googlePrivateKey: normalizePrivateKey(
+      hasBase64 ? fromBase64?.key || '' : env.GOOGLE_PRIVATE_KEY || ''
+    ),
 
     // Telegram group where riders + you see jobs. Get the id with /myid inside the group.
     dispatchChatId: env.DISPATCH_CHAT_ID || '',
@@ -104,19 +120,37 @@ export function loadConfig(env = process.env) {
   if (!['sheets', 'memory'].includes(storage)) problems.push('STORAGE must be "sheets" or "memory"');
   if (storage === 'sheets') {
     if (!config.sheetId) problems.push('GOOGLE_SHEET_ID is missing');
-    if (!config.googleCredentialsFile && !(config.googleClientEmail && config.googlePrivateKey)) {
-      problems.push(
-        'Set GOOGLE_CREDENTIALS_FILE (or GOOGLE_CREDENTIALS_BASE64, or GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY)'
-      );
-    }
-    if (config.googlePrivateKey) {
-      try {
-        createPrivateKey(config.googlePrivateKey);
-      } catch {
+    if (!config.googleCredentialsFile) {
+      if (hasBase64) {
+        if (!fromBase64) {
+          problems.push(
+            'GOOGLE_CREDENTIALS_BASE64 could not be decoded. Re-generate it (DEPLOY.md), or use a Render Secret File.'
+          );
+        } else if (!fromBase64.key) {
+          problems.push(
+            'GOOGLE_CREDENTIALS_BASE64 decoded but contains no private_key. Base64 the whole google-key.json file.'
+          );
+        }
+      } else if (!config.googleClientEmail || !config.googlePrivateKey) {
         problems.push(
-          'The Google private key is not valid PEM (often a truncated/quoted value on hosting dashboards). ' +
-            'On Render, set GOOGLE_CREDENTIALS_BASE64 to the base64 of google-key.json — see DEPLOY.md'
+          'Set GOOGLE_CREDENTIALS_FILE (or GOOGLE_CREDENTIALS_BASE64, or GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY)'
         );
+      }
+      if (config.googlePrivateKey && !config.googleClientEmail) {
+        problems.push('GOOGLE_CLIENT_EMAIL is missing (set it, or base64 the whole google-key.json).');
+      }
+      if (config.googlePrivateKey) {
+        try {
+          createPrivateKey(config.googlePrivateKey);
+        } catch {
+          problems.push(
+            'The Google private key is not valid PEM. ' +
+              `Source: ${credentialsSource}; key chars: ${config.googlePrivateKey.length}; ` +
+              `header: ${config.googlePrivateKey.includes('-----BEGIN') ? 'yes' : 'no'}; ` +
+              `footer: ${config.googlePrivateKey.includes('-----END') ? 'yes' : 'no'}. ` +
+              'Use a Render Secret File (DEPLOY.md) or reset GOOGLE_CREDENTIALS_BASE64.'
+          );
+        }
       }
     }
   }

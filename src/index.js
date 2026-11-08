@@ -8,6 +8,16 @@ import { createSheetsStore } from './storage/sheetsStore.js';
 dotenv.config({ quiet: true });
 if (process.argv.includes('--demo')) process.env.STORAGE = 'memory';
 const { config, problems } = loadConfig();
+if (config.storage === 'sheets') {
+  const key = config.googlePrivateKey;
+  const source = config.googleCredentialsSource;
+  const detail =
+    source === 'GOOGLE_CREDENTIALS_FILE'
+      ? ` (${config.googleCredentialsFile})`
+      : ` (base64 ${config.googleCredentialsBase64Set ? (config.googleCredentialsBase64Decoded ? 'decoded' : 'invalid') : 'not set'}, ` +
+        `key ${key.length} chars, header ${key.includes('-----BEGIN') ? 'yes' : 'no'})`;
+  console.log(`🔑 Google credentials: ${source}${detail}`);
+}
 if (problems.length) {
   console.error('❌ Please fix your .env file:\n- ' + problems.join('\n- '));
   process.exit(1);

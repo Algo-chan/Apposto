@@ -70,18 +70,29 @@ Add the environment variables below under **Environment**.
 | `BOT_TOKEN` | yes | Token from @BotFather |
 | `STORAGE` | yes | `sheets` |
 | `GOOGLE_SHEET_ID` | yes | The id from the sheet URL (`/d/THIS_PART/edit`) |
-| `GOOGLE_CLIENT_EMAIL` | recommended | `client_email` from `google-key.json` (auto-read from the base64 JSON too) |
-| `GOOGLE_CREDENTIALS_BASE64` | yes on Render | Base64 of the whole `google-key.json` (recommended — see below) |
+| `GOOGLE_CREDENTIALS_FILE` | recommended on Render | `/etc/secrets/google-key.json` when using a Render **Secret File** (see below) |
+| `GOOGLE_CLIENT_EMAIL` | recommended | `client_email` from `google-key.json` (auto-read from base64 JSON too) |
+| `GOOGLE_CREDENTIALS_BASE64` | alternative | Base64 of the whole `google-key.json` (see below) |
 | `GOOGLE_PRIVATE_KEY` | alternative | `private_key` PEM; only if you keep its newlines (see below) |
 | `DISPATCH_CHAT_ID` | yes for riders | Group chat id, starts with `-100` (get it with `/myid` in the group) |
 | `ADMIN_IDS` | yes for admin commands | Your Telegram id, comma-separated (`123,456`) |
 | `SUPPORT_PHONE` | recommended | Phone shown to customers |
 | `BRAND_NAME` | optional | Default: `Delivery` |
 
-**Do not set `GOOGLE_CREDENTIALS_FILE`** on Render — there is no `google-key.json` in the repo.
-Use `GOOGLE_CREDENTIALS_BASE64` instead.
+### Render Secret File (most reliable)
 
-### `GOOGLE_CREDENTIALS_BASE64` (recommended)
+This avoids PEM/newline/base64 mangling completely.
+
+1. Render Dashboard → your service → **Environment** → **Secret Files** → **Add Secret File**.
+2. **Filename:** `google-key.json`
+3. **Contents:** paste the entire contents of your local `google-key.json`.
+4. Add the env var `GOOGLE_CREDENTIALS_FILE=/etc/secrets/google-key.json`
+5. Remove `GOOGLE_CREDENTIALS_BASE64` and `GOOGLE_PRIVATE_KEY` (or leave them empty) to avoid confusion.
+6. Save — Render restarts and reads the key from the mounted file.
+
+The startup log will show `🔑 Google credentials: GOOGLE_CREDENTIALS_FILE (/etc/secrets/google-key.json)`.
+
+### `GOOGLE_CREDENTIALS_BASE64` (alternative)
 
 Dashboard env-var fields often destroy PEM newlines, which causes
 `error:1E08010C:DECODER routines::unsupported`. Base64 is a single safe line:
@@ -170,7 +181,8 @@ to change.
 | Symptom | Fix |
 |---|---|
 | `Missing tab "Merchants" in the spreadsheet` | Run `npm run setup-sheet` locally against the same `GOOGLE_SHEET_ID` |
-| `DECODER routines::unsupported` / `ERR_OSSL_UNSUPPORTED` | The private key lost its newlines or was truncated. Remove `GOOGLE_PRIVATE_KEY` and set `GOOGLE_CREDENTIALS_BASE64` (above); the app logs a clear config error instead of crashing |
+| `DECODER routines::unsupported` / `ERR_OSSL_UNSUPPORTED` | The private key lost its newlines or was truncated. Use a **Render Secret File** (above), or set `GOOGLE_CREDENTIALS_BASE64` and remove `GOOGLE_PRIVATE_KEY` |
+| `Source: GOOGLE_PRIVATE_KEY` in the startup error | The app did not see `GOOGLE_CREDENTIALS_BASE64` (wrong name, blank, or not saved). Check the exact spelling `GOOGLE_CREDENTIALS_BASE64`, or switch to a Secret File |
 | `409 Conflict: terminated by other getUpdates request` | Another copy is polling with the same token; stop your local bot |
 | Deploy fails health check | The app must bind `$PORT`; keep the health server code in `src/index.js` and use `npm start` |
 | Bot does nothing, logs fine | Check `BOT_TOKEN`, then send `/myid`; make sure the bot is not blocked |
