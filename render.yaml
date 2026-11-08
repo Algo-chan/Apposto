@@ -1,0 +1,35 @@
+# Render Blueprint — free web service running the Telegram bot.
+# The bot uses long polling; /health is only there for Render's health check
+# and for an external keep-alive pinger (see DEPLOY.md).
+services:
+  - type: web
+    name: delivery-bot
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: STORAGE
+        value: sheets
+      - key: BRAND_NAME
+        value: Delivery
+      # Secrets: Render asks for these when you create the Blueprint.
+      - key: BOT_TOKEN
+        sync: false
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: GOOGLE_CLIENT_EMAIL
+        sync: false
+      - key: GOOGLE_PRIVATE_KEY
+        sync: false
+      - key: DISPATCH_CHAT_ID
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: SUPPORT_PHONE
+        sync: false
