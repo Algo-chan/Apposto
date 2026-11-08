@@ -45,6 +45,16 @@ test('GOOGLE_CREDENTIALS_BASE64 also accepts only the PEM key', () => {
   assert.doesNotThrow(() => createPrivateKey(config.googlePrivateKey));
 });
 
+test('a missing GOOGLE_CREDENTIALS_FILE produces a clear config error', () => {
+  const { problems } = loadConfig({
+    STORAGE: 'sheets',
+    BOT_TOKEN: 'x',
+    GOOGLE_SHEET_ID: 'sheet-id',
+    GOOGLE_CREDENTIALS_FILE: './does-not-exist-google-key.json',
+  });
+  assert.ok(problems.some((p) => p.includes('not readable')));
+});
+
 test('a broken private key produces a clear config error, not a crypto crash', () => {
   const { problems } = loadConfig({
     STORAGE: 'sheets',

@@ -1,5 +1,6 @@
 // All settings come from environment variables (.env file). See .env.example.
 import { createPrivateKey } from 'node:crypto';
+import fs from 'node:fs';
 
 /**
  * Hosting dashboards often mangle PEM values: newlines become spaces or literal "\n",
@@ -120,6 +121,16 @@ export function loadConfig(env = process.env) {
   if (!['sheets', 'memory'].includes(storage)) problems.push('STORAGE must be "sheets" or "memory"');
   if (storage === 'sheets') {
     if (!config.sheetId) problems.push('GOOGLE_SHEET_ID is missing');
+    if (config.googleCredentialsFile) {
+      try {
+        fs.accessSync(config.googleCredentialsFile, fs.constants.R_OK);
+      } catch {
+        problems.push(
+          `GOOGLE_CREDENTIALS_FILE is set but not readable: ${config.googleCredentialsFile} ` +
+            '(on Render, upload the key as a Secret File at /etc/secrets/google-key.json)'
+        );
+      }
+    }
     if (!config.googleCredentialsFile) {
       if (hasBase64) {
         if (!fromBase64) {
