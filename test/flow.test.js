@@ -1,0 +1,465 @@
+// End-to-end: the real bot code, a fake Telegram API, in-memory storage.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createBot } from '../src/bot/createBot.js';
+import { createMemoryStore } from '../src/storage/memoryStore.js';
+import { loadConfig } from '../src/config.js';
+
+const BOT = { id: 999999, is_bot: true, first_name: 'Bot', username: 'test_bot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false };
+const CUSTOMER = 100, MERCHANT = 200, RIDER = 300, RIDER2 = 301, ADMIN = 500, STRANGER = 666, GROUP = -1001;
+
+function setup() {
+  const origWarn = console.warn;
+  console.warn = () => {};
+  const { config } = loadConfig({
+    BOT_TOKEN: '1:test', STORAGE: 'memory', DISPATCH_CHAT_ID: String(GROUP), ADMIN_IDS: String(ADMIN), SUPPORT_PHONE: '0911000000',
+  });
+  console.warn = origWarn;
+  const store = createMemoryStore({
+    merchants: [{
+      id: 'M1', nameEn: 'Burger House', nameOm: 'Mana Baargarii', nameAm: 'በርገር ቤት', telegramId: String(MERCHANT),
+      phone: '0911111111', lang: 'om', telebirr: '0911111111', cbeAccount: '1000123', accountName: 'Abebe K',
+      commissionPct: 8, lat: 7.2, lng: 38.6, active: true,
+    }],
+    menu: [
+      { id: 'I1', merchantId: 'M1', nameEn: 'Burger', nameOm: 'Baargarii', nameAm: 'በርገር', price: 250, active: true },
+      { id: 'I2', merchantId: 'M1', nameEn: 'Chips', nameOm: 'Chiipsii', nameAm: 'ችፕስ', price: 120, active: true },
+    ],
+    riders: [
+      { telegramId: String(RIDER), name: 'Kebede', phone: '0922222222', lang: 'am', active: true },
+      { telegramId: String(RIDER2), name: 'Lensa', phone: '0933333333', lang: 'om', active: true },
+    ],
+  });
+  const { bot } = createBot({ config, store, botInfo: BOT });
+  const calls = [];
+  const blocked = new Set(); // chat ids that never pressed Start
+  let mid = 5000;
+  bot.api.config.use(async (_prev, method, payload) => {
+    calls.push({ method, payload });
+    if (method === 'sendMessage' && blocked.has(String(payload.chat_id))) {
+      return { ok: false, error_code: 403, description: "Forbidden: bot can't initiate conversation with a user" };
+    }
+    if (method.startsWith('send') || method === 'editMessageText') {
+      return { ok: true, result: { message_id: mid++, date: 0, chat: { id: payload.chat_id, type: 'private' }, text: payload.text } };
+    }
+    return { ok: true, result: true };
+  });
+
+  let uid = 1;
+  const user = (id) => ({ id, is_bot: false, first_name: `U${id}` });
+  const chatOf = (id) => (id < 0 ? { id, type: 'supergroup', title: 'Dispatch' } : { id, type: 'private', first_name: `U${id}` });
+  async function send(from, chatId, fields) {
+    const message = { message_id: uid, date: 0, chat: chatOf(chatId), from: user(from), ...fields };
+    if (typeof fields.text === 'string' && fields.text.startsWith('/')) {
+      message.entities = [{ type: 'bot_command', offset: 0, length: fields.text.split(' ')[0].length }];
+    }
+    await bot.handleUpdate({ update_id: uid++, message });
+  }
+  const text = (from, t, chatId = from) => send(from, chatId, { text: t });
+  async function tap(from, data, chatId = from, messageText = 'msg') {
+    await bot.handleUpdate({
+      update_id: uid++,
+      callback_query: { id: String(uid), from: user(from), chat_instance: 'x', data, message: { message_id: 1, date: 0, chat: chatOf(chatId), from: BOT, text: messageText } },
+    });
+  }
+  const sentTo = (chatId) => calls.filter((c) => c.method === 'sendMessage' && String(c.payload.chat_id) === String(chatId));
+  const lastTo = (chatId) => sentTo(chatId).at(-1)?.payload;
+  const lastAlert = () => calls.filter((c) => c.method === 'answerCallbackQuery').at(-1)?.payload;
+  const buttons = (payload) => (payload?.reply_markup?.inline_keyboard || []).flat().map((b) => b.callback_data);
+  const lastEdit = () => calls.filter((c) => c.method === 'editMessageText').at(-1)?.payload;
+  const order = async (id) => store.getOrder(id);
+  const latestOrder = async () => (await store.listOrders()).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || 0).at(-1);
+
+  async function placeOrder(cust, { items = ['add:I1'], custom = null, location = { latitude: 7.205, longitude: 38.6 }, phone = '+251911234567' } = {}) {
+    await text(cust, '/start');
+    if (calls.length && buttons(lastTo(cust)).includes('lang:en')) await tap(cust, 'lang:en');
+    await text(cust, '🛍 Order');
+    await tap(cust, 'm:M1');
+    for (const it of items) await tap(cust, it);
+    if (custom) {
+      await tap(cust, 'custom');
+      await text(cust, custom);
+    }
+    await tap(cust, 'checkout');
+    if (location) await send(cust, cust, { location });
+    else await text(cust, '⏭ Skip');
+    await text(cust, 'Near Abyssinia bank, blue gate');
+    await send(cust, cust, { contact: { phone_number: phone, first_name: 'C' } });
+    await tap(cust, 'confirm');
+    const all = await store.listOrders({ customerId: cust });
+    return all.at(-1).id;
+  }
+
+  return { bot, store, calls, blocked, text, send, tap, sentTo, lastTo, lastAlert, buttons, lastEdit, order, latestOrder, placeOrder, config };
+}
+
+test('happy path: order -> accept -> pay -> confirm -> rider -> delivered, with attack attempts', async () => {
+  const h = setup();
+
+  // language picker on first start
+  await h.text(CUSTOMER, '/start');
+  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), ['lang:om', 'lang:am', 'lang:en']);
+
+  const id = await h.placeOrder(CUSTOMER, { items: ['add:I1', 'add:I1', 'add:I2'] });
+  let o = await h.order(id);
+  assert.equal(o.status, 'PLACED');
+  assert.equal(o.foodTotal, 620); // 2x250 + 120
+  assert.equal(o.deliveryFee, 60); // ~0.7 km
+  assert.equal(o.customerPhone, '0911234567');
+  assert.equal(o.landmark, 'Near Abyssinia bank, blue gate');
+
+  // shop got the order IN AFAAN OROMO with accept/reject
+  const toShop = h.lastTo(MERCHANT);
+  assert.match(toShop.text, /Ajaja haaraa/);
+  assert.deepEqual(h.buttons(toShop), [`macc:${id}`, `mrej:${id}`]);
+  assert.match(h.sentTo(GROUP).at(-1).payload.text, /🆕/);
+
+  // ATTACK: a stranger presses the shop's Accept button
+  await h.tap(STRANGER, `macc:${id}`);
+  assert.match(h.lastAlert().text, /not allowed/);
+  assert.equal((await h.order(id)).status, 'PLACED');
+
+  // shop accepts -> customer gets payment instructions with shop accounts
+  await h.tap(MERCHANT, `macc:${id}`);
+  o = await h.order(id);
+  assert.equal(o.status, 'ACCEPTED');
+  assert.equal(o.commission, 50); // 8% of 620 = 49.6
+  const payMsg = h.lastTo(CUSTOMER).text;
+  assert.match(payMsg, /Pay 620 Br to the shop/);
+  assert.match(payMsg, /Telebirr: 0911111111/);
+  assert.match(payMsg, /Pay 70 Br/); // 60 delivery + 10 service
+
+  // shop presses Accept twice -> no double processing
+  await h.tap(MERCHANT, `macc:${id}`);
+  assert.match(h.lastAlert().text, /duraan haaromfameera/); // shop's own language
+
+  // customer sends junk, then a real reference
+  await h.text(CUSTOMER, 'hello');
+  assert.match(h.lastTo(CUSTOMER).text, /reference number/);
+  await h.text(CUSTOMER, 'ck12 ab34 cd');
+  o = await h.order(id);
+  assert.equal(o.status, 'PAYMENT_SUBMITTED');
+  assert.equal(o.paymentRef, 'CK12AB34CD');
+  assert.deepEqual(h.buttons(h.lastTo(MERCHANT)), [`mpay:${id}`, `mnopay:${id}`]);
+
+  // shop says money NOT received -> customer must resend
+  await h.tap(MERCHANT, `mnopay:${id}`);
+  o = await h.order(id);
+  assert.equal(o.status, 'ACCEPTED');
+  assert.equal(o.paymentRef, '');
+  assert.match(h.lastTo(CUSTOMER).text, /could not find your payment/);
+  assert.match(h.sentTo(GROUP).at(-1).payload.text, /NOT received/);
+
+  await h.text(CUSTOMER, 'CK12AB34CD');
+  await h.tap(MERCHANT, `mpay:${id}`);
+  assert.equal((await h.order(id)).status, 'CONFIRMED');
+  assert.match(h.lastTo(CUSTOMER).text, /Payment confirmed/);
+  const job = h.sentTo(GROUP).at(-1).payload;
+  assert.match(job.text, /New delivery/);
+  assert.deepEqual(h.buttons(job), [`take:${id}`]);
+
+  // ATTACK: random group member tries to take the job
+  await h.tap(STRANGER, `take:${id}`, GROUP);
+  assert.match(h.lastAlert().text, /registered riders/);
+
+  // two riders tap at the same moment: exactly one wins
+  await Promise.all([h.tap(RIDER, `take:${id}`, GROUP), h.tap(RIDER2, `take:${id}`, GROUP)]);
+  o = await h.order(id);
+  assert.ok([String(RIDER), String(RIDER2)].includes(o.riderId));
+  const winner = Number(o.riderId);
+  const loser = winner === RIDER ? RIDER2 : RIDER;
+  assert.equal(h.sentTo(loser).length, 0, 'loser must not receive the job');
+  assert.equal(o.riderPay, 45);
+  assert.ok(h.calls.some((c) => c.method === 'sendLocation' && c.payload.chat_id === String(winner)));
+  assert.match(h.lastTo(CUSTOMER).text, /will deliver order/);
+
+  // shop marks ready -> rider notified
+  await h.tap(MERCHANT, `mready:${id}`);
+  assert.equal((await h.order(id)).status, 'READY');
+
+  // ATTACK: the other rider tries to mark it picked up
+  await h.tap(loser, `rpick:${id}`);
+  assert.match(h.lastAlert().text, /⛔/);
+  assert.equal((await h.order(id)).status, 'READY');
+
+  await h.tap(winner, `rpick:${id}`);
+  assert.equal((await h.order(id)).status, 'PICKED_UP');
+  assert.deepEqual(h.buttons(h.lastEdit()), [`rdone:${id}`]);
+  await h.tap(winner, `rdone:${id}`);
+  o = await h.order(id);
+  assert.equal(o.status, 'DELIVERED');
+  assert.ok(o.deliveredAt);
+  assert.ok(h.sentTo(CUSTOMER).some((c) => /Order .* delivered/.test(c.payload.text)));
+  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), [1, 2, 3, 4, 5].map((n) => `rf:${id}:${n}`));
+  // you keep: 50 commission + 10 service + 60 delivery - 45 rider = 75
+  assert.match(h.sentTo(GROUP).at(-1).payload.text, /you earned 75 Br/);
+
+  // admin report
+  await h.text(ADMIN, '/today', GROUP);
+  assert.match(h.lastTo(GROUP).text, /You earned: 75 Br/);
+  // non-admin can't see it
+  await h.text(STRANGER, '/today', GROUP);
+  assert.match(h.lastTo(GROUP).text, /not allowed/);
+});
+
+test('custom request: shop sets the final price', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER, { items: [], custom: '2 shiro, 1 mango juice', location: null, phone: '0911234567' });
+  let o = await h.order(id);
+  assert.equal(o.foodTotal, null);
+  assert.equal(o.customRequest, '2 shiro, 1 mango juice');
+  assert.equal(o.deliveryFee, 60); // skipped location -> base fee
+
+  await h.tap(MERCHANT, `macc:${id}`);
+  assert.match(h.lastTo(MERCHANT).text, /DHUMAA/); // asked for price in Oromo
+  await h.text(MERCHANT, 'abc');
+  assert.equal((await h.order(id)).status, 'PLACED');
+  await h.text(MERCHANT, '450');
+  o = await h.order(id);
+  assert.equal(o.status, 'ACCEPTED');
+  assert.equal(o.foodTotal, 450);
+  assert.equal(o.commission, 36);
+  assert.match(h.lastTo(CUSTOMER).text, /Pay 450 Br/);
+});
+
+test('out of range for bicycles is refused before ordering', async () => {
+  const h = setup();
+  await h.text(CUSTOMER, '/start');
+  await h.tap(CUSTOMER, 'lang:en');
+  await h.text(CUSTOMER, '🛍 Order');
+  await h.tap(CUSTOMER, 'm:M1');
+  await h.tap(CUSTOMER, 'add:I1');
+  await h.tap(CUSTOMER, 'checkout');
+  await h.send(CUSTOMER, CUSTOMER, { location: { latitude: 7.25, longitude: 38.6 } }); // ~5.5 km away
+  assert.match(h.lastTo(CUSTOMER).text, /we deliver up to 3 km/);
+  assert.equal((await h.store.listOrders()).length, 0);
+});
+
+test('fraud: the same payment reference cannot be reused on another order', async () => {
+  const h = setup();
+  const a = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `macc:${a}`);
+  await h.text(CUSTOMER, 'CK12AB34CD');
+  await h.tap(MERCHANT, `mpay:${a}`);
+
+  const b = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `macc:${b}`);
+  await h.text(CUSTOMER, 'CK12AB34CD');
+  assert.match(h.lastTo(CUSTOMER).text, /already used/);
+  assert.equal((await h.order(b)).status, 'ACCEPTED');
+});
+
+test('rider who never pressed Start gets told, and the job stays open', async () => {
+  const h = setup();
+  h.blocked.add(String(RIDER2));
+  const id = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `macc:${id}`);
+  await h.text(CUSTOMER, 'CK99XY88ZZ');
+  await h.tap(MERCHANT, `mpay:${id}`);
+  await h.tap(RIDER2, `take:${id}`, GROUP);
+  assert.match(h.lastAlert().text, /Start/);
+  assert.equal((await h.order(id)).riderId, '');
+  await h.tap(RIDER, `take:${id}`, GROUP);
+  assert.equal((await h.order(id)).riderId, String(RIDER));
+});
+
+test('cancel rules: customer only before paying, admin anytime', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `macc:${id}`);
+  await h.text(CUSTOMER, 'CK55AA66BB');
+  // customer tries to cancel after sending money -> refused
+  await h.tap(CUSTOMER, `ccancel:${id}`);
+  assert.match(h.lastAlert().text, /can't be cancelled/);
+  // ATTACK: someone else cancels the customer's order
+  await h.tap(STRANGER, `ccancel:${id}`);
+  assert.equal((await h.order(id)).status, 'PAYMENT_SUBMITTED');
+  // non-admin presses admin cancel
+  await h.tap(STRANGER, `acancel:${id}`, GROUP);
+  assert.match(h.lastAlert().text, /not allowed/);
+  // admin cancels: everyone is told
+  await h.tap(ADMIN, `acancel:${id}`, GROUP);
+  assert.equal((await h.order(id)).status, 'CANCELLED');
+  assert.match(h.lastTo(CUSTOMER).text, /cancelled/);
+  assert.match(h.lastTo(MERCHANT).text, /haqameera/);
+
+  // customer CAN cancel before paying
+  const id2 = await h.placeOrder(CUSTOMER);
+  await h.tap(CUSTOMER, `ccancel:${id2}`);
+  assert.equal((await h.order(id2)).status, 'CANCELLED');
+});
+
+test('shop without Telegram: messages go to the dispatch group and admin can act for it', async () => {
+  const h = setup();
+  h.store._db.merchants[0].telegramId = '';
+  const id = await h.placeOrder(CUSTOMER);
+  const toGroup = h.sentTo(GROUP).find((c) => /no Telegram, call 0911111111/.test(c.payload.text));
+  assert.ok(toGroup, 'dispatch group should get the shop message');
+  assert.deepEqual(h.buttons(toGroup.payload), [`macc:${id}`, `mrej:${id}`]);
+  await h.tap(ADMIN, `macc:${id}`, GROUP);
+  assert.equal((await h.order(id)).status, 'ACCEPTED');
+});
+
+// helper: run one order all the way to DELIVERED
+async function deliverOne(h, cust = CUSTOMER) {
+  const id = await h.placeOrder(cust);
+  await h.tap(MERCHANT, `macc:${id}`);
+  await h.text(cust, `CK${String(Math.random()).slice(2, 10)}`);
+  await h.tap(MERCHANT, `mpay:${id}`);
+  await h.tap(RIDER, `take:${id}`, GROUP);
+  await h.tap(MERCHANT, `mready:${id}`);
+  await h.tap(RIDER, `rpick:${id}`);
+  await h.tap(RIDER, `rdone:${id}`);
+  return id;
+}
+
+test('ETA: shown on menu, summary, after payment and on the way; status times recorded', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER);
+  const menu = h.calls.filter((c) => c.method === 'editMessageText' && /🏪/.test(c.payload.text)).at(-1).payload.text;
+  // default prep 20 + pickup 5 + 2 km * 4.5 + buffer 5 = 39 -> 35-45 min
+  assert.match(menu, /about 35–45 min/);
+  const summary = h.sentTo(CUSTOMER).find((c) => /Order summary/.test(c.payload.text)).payload.text;
+  // ~0.7 km -> 20 + 5 + 3.15 + 5 = 33 -> 30-40 min
+  assert.match(summary, /about 30–40 min/);
+  await h.tap(MERCHANT, `macc:${id}`);
+  await h.text(CUSTOMER, 'CK12AB34CD');
+  await h.tap(MERCHANT, `mpay:${id}`);
+  assert.match(h.lastTo(CUSTOMER).text, /Estimated arrival: in about 30–40 min/);
+  let o = await h.order(id);
+  assert.equal(o.etaMin, 30);
+  assert.equal(o.etaMax, 40);
+  assert.ok(o.acceptedAt && o.confirmedAt);
+  await h.tap(RIDER, `take:${id}`, GROUP);
+  await h.tap(RIDER, `rpick:${id}`);
+  assert.match(h.lastTo(CUSTOMER).text, /Arriving in about 5–10 min/);
+  o = await h.order(id);
+  assert.ok(o.pickedUpAt);
+});
+
+test('ETA learns the real prep time of each shop', async () => {
+  const { learnedPrepMinutes } = await import('../src/core/eta.js');
+  const mk = (i, prep) => ({ createdAt: `2026-11-0${i} 12:00:00`, confirmedAt: `2026-11-0${i} 12:00:00`, readyAt: `2026-11-0${i} 12:${String(prep).padStart(2, '0')}:00` });
+  assert.equal(learnedPrepMinutes([mk(1, 30), mk(2, 30)], 20), 20); // too few samples -> fallback
+  assert.equal(learnedPrepMinutes([mk(1, 30), mk(2, 32), mk(3, 28), mk(4, 31), mk(5, 55)], 20), 31); // median: one slow day does not skew it
+});
+
+test('ratings: stars -> rider thumb -> comment; shop notified; low ratings alert you', async () => {
+  const h = setup();
+  const id = await deliverOne(h);
+
+  // ATTACK: someone else tries to rate this order
+  await h.tap(STRANGER, `rf:${id}:1`);
+  assert.equal(await h.store.getReview(id), null);
+
+  await h.tap(CUSTOMER, `rf:${id}:2`);
+  let r = await h.store.getReview(id);
+  assert.equal(r.foodStars, 2);
+  assert.match(h.sentTo(GROUP).at(-1).payload.text, /Low food rating/);
+  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), [`rr:${id}:up`, `rr:${id}:down`]);
+
+  // double tap: can't rate twice
+  await h.tap(CUSTOMER, `rf:${id}:5`);
+  assert.match(h.lastAlert().text, /already rated/);
+  assert.equal((await h.store.getReview(id)).foodStars, 2);
+
+  await h.tap(CUSTOMER, `rr:${id}:down`);
+  assert.equal((await h.store.getReview(id)).riderThumb, 'down');
+  assert.match(h.sentTo(GROUP).at(-1).payload.text, /got 👎/);
+  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), [`rvskip:${id}`]);
+
+  await h.text(CUSTOMER, 'Food was cold');
+  r = await h.store.getReview(id);
+  assert.equal(r.comment, 'Food was cold');
+  assert.match(h.lastTo(CUSTOMER).text, /Thank you/);
+  // shop gets it in Afaan Oromo
+  assert.match(h.lastTo(MERCHANT).text, /Yaada haaraa.*⭐⭐☆☆☆/s);
+  assert.match(h.lastTo(MERCHANT).text, /Food was cold/);
+  assert.match(h.sentTo(GROUP).at(-1).payload.text, /Food was cold/);
+
+  // after the review, normal text is not treated as a comment
+  await h.text(CUSTOMER, 'hello');
+  assert.equal((await h.store.getReview(id)).comment, 'Food was cold');
+});
+
+test('cannot rate an order that is not delivered yet', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER);
+  await h.tap(CUSTOMER, `rf:${id}:5`);
+  assert.equal(await h.store.getReview(id), null);
+});
+
+test('shop rating appears in the shop list only after 5 reviews; /today shows ratings', async () => {
+  const h = setup();
+  for (let i = 0; i < 5; i++) {
+    const id = await deliverOne(h);
+    await h.tap(CUSTOMER, `rf:${id}:${i < 4 ? 5 : 4}`);
+    await h.tap(CUSTOMER, `rr:${id}:up`);
+    await h.tap(CUSTOMER, `rvskip:${id}`);
+    if (i === 3) {
+      await h.text(CUSTOMER, '🛍 Order');
+      const list = h.lastTo(CUSTOMER).reply_markup.inline_keyboard.flat()[0].text;
+      assert.equal(list, '🏪 Burger House'); // 4 reviews: hidden
+    }
+  }
+  await h.text(CUSTOMER, '🛍 Order');
+  const label = h.lastTo(CUSTOMER).reply_markup.inline_keyboard.flat()[0].text;
+  assert.equal(label, '🏪 Burger House · ⭐ 4.8 (5)');
+  await h.text(ADMIN, '/today', GROUP);
+  assert.match(h.lastTo(GROUP).text, /Food rating: 4\.8 \(5 reviews\)/);
+  assert.match(h.lastTo(GROUP).text, /5 👍 · 0 👎/);
+});
+
+test('desktop user: inline menu, Skip button, pasted location — full order without phone-only buttons', async () => {
+  const h = setup();
+  await h.text(CUSTOMER, '/start');
+  await h.tap(CUSTOMER, 'lang:en');
+  // home always has inline buttons (visible on Telegram Desktop)
+  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), ['menu:order', 'menu:orders', 'menu:help', 'menu:lang']);
+  // random text -> "Use the buttons below" WITH inline buttons
+  await h.text(CUSTOMER, 'hello');
+  assert.match(h.lastTo(CUSTOMER).text, /buttons below/);
+  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), ['menu:order', 'menu:orders', 'menu:help', 'menu:lang']);
+  // inline Order -> shop list
+  await h.tap(CUSTOMER, 'menu:order');
+  assert.ok(h.buttons(h.lastEdit()).includes('m:M1'));
+  await h.tap(CUSTOMER, 'm:M1');
+  await h.tap(CUSTOMER, 'add:I1');
+  await h.tap(CUSTOMER, 'checkout');
+  // desktop hint with inline Skip
+  assert.match(h.lastTo(CUSTOMER).text, /On a computer/);
+  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), ['skiploc']);
+  await h.tap(CUSTOMER, 'skiploc');
+  assert.match(h.lastTo(CUSTOMER).text, /type your answer/);
+  await h.text(CUSTOMER, 'Near the bus station, green gate');
+  await h.text(CUSTOMER, '0911234567');
+  await h.tap(CUSTOMER, 'confirm');
+  const o = (await h.store.listOrders({ customerId: CUSTOMER })).at(-1);
+  assert.equal(o.status, 'PLACED');
+  assert.equal(o.landmark, 'Near the bus station, green gate');
+  assert.equal(o.distanceKm, null);
+});
+
+test('desktop user can paste coordinates or a Google Maps link as location', async () => {
+  const { parseLatLng } = await import('../src/core/orders.js');
+  assert.deepEqual(parseLatLng('7.2001, 38.5995'), { lat: 7.2001, lng: 38.5995 });
+  assert.deepEqual(parseLatLng('https://www.google.com/maps/@7.2050,38.6000,17z'), { lat: 7.205, lng: 38.6 });
+  assert.deepEqual(parseLatLng('https://maps.google.com/?q=7.2101,38.6010'), { lat: 7.2101, lng: 38.601 });
+  assert.equal(parseLatLng('near the bank'), null);
+  assert.equal(parseLatLng('call me 0911234567'), null);
+
+  const h = setup();
+  await h.text(CUSTOMER, '/start');
+  await h.tap(CUSTOMER, 'lang:en');
+  await h.tap(CUSTOMER, 'menu:order');
+  await h.tap(CUSTOMER, 'm:M1');
+  await h.tap(CUSTOMER, 'add:I1');
+  await h.tap(CUSTOMER, 'checkout');
+  await h.text(CUSTOMER, 'https://www.google.com/maps/@7.2050,38.6000,17z');
+  assert.match(h.lastTo(CUSTOMER).text, /landmark/);
+  await h.text(CUSTOMER, 'Blue gate near school');
+  await h.text(CUSTOMER, '0911234567');
+  await h.tap(CUSTOMER, 'confirm');
+  const o = (await h.store.listOrders({ customerId: CUSTOMER })).at(-1);
+  assert.ok(o.distanceKm > 0.5 && o.distanceKm < 0.9, `distance ${o.distanceKm}`);
+});
