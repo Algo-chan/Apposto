@@ -158,6 +158,8 @@ If the customer skips sharing location, they pay the base fee and the rider call
 
 ## 6. Run it 24/7 on a server
 
+**Deploying on Render?** Follow [DEPLOY.md](DEPLOY.md) for the free Web Service + keep-alive setup.
+
 Cheapest: a small VPS (Hetzner/DigitalOcean, ~$5/month), Ubuntu.
 ```bash
 # on the server
