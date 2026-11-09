@@ -22,3 +22,19 @@ test('the same payment reference sent by two customers at once is accepted only 
   const withRef = (await store.listOrders()).filter((o) => o.paymentRef === 'FT12345678');
   assert.equal(withRef.length, 1);
 });
+
+test('placing an order checks the new id without re-reading the sheet', async () => {
+  const store = createMemoryStore();
+  const seen = [];
+  const getOrder = store.getOrder;
+  store.getOrder = (id, opts) => { seen.push(opts); return getOrder(id, opts); };
+  const service = createOrderService({ store, config: { serviceFee: 10, defaultCommissionPct: 8 } });
+  await service.placeOrder({
+    customer: { id: 100, name: 'C', lang: 'en' },
+    merchant: { id: 'M1', names: { en: 'Shop' }, commissionPct: 8 },
+    summary: { lines: [{ itemId: 'I1', nameEn: 'Burger', qty: 1, price: 250 }], total: 250, custom: null },
+    checkout: { phone: '0911234567', landmark: 'near bank', deliveryFee: 40, distanceKm: 1 },
+  });
+  assert.ok(seen.length >= 1);
+  assert.ok(seen.every((o) => o?.refresh === false));
+});

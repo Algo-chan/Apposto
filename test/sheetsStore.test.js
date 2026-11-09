@@ -64,3 +64,16 @@ test('getOrder finds an order another instance wrote after load', async () => {
     store.close();
   }
 });
+
+test('getOrder with refresh off never reads the sheet on a miss', async () => {
+  const { sheets, store } = await setup();
+  try {
+    let reads = 0;
+    const getRows = sheets.Orders.getRows;
+    sheets.Orders.getRows = (...a) => { reads++; return getRows(...a); };
+    assert.equal(await store.getOrder('261109-NEW1', { refresh: false }), null);
+    assert.equal(reads, 0);
+  } finally {
+    store.close();
+  }
+});

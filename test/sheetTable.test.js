@@ -256,3 +256,13 @@ test('add is not retried on a server error', async () => {
   assert.equal(fake.calls.append, 1);
   assert.equal(table.get('O1'), null);
 });
+
+test('misses at the same moment share one sheet read', async () => {
+  const { fake, table } = setup(ROWS);
+  await table.load();
+  const before = fake.calls.readAll;
+  await Promise.all([table.getOrRefresh('x1'), table.getOrRefresh('x2'), table.refresh()]);
+  assert.equal(fake.calls.readAll - before, 1);
+  await table.getOrRefresh('x3'); // a later miss reads again
+  assert.equal(fake.calls.readAll - before, 2);
+});

@@ -26,6 +26,7 @@ export function createSheetTable({
 }) {
   // key -> { handle, data, writtenAt }. writtenAt = when the bot last wrote this row.
   let rows = new Map();
+  let refreshing = null; // the refresh in flight, shared by everyone who needs one
   const locks = new Map(); // key -> tail of that key's write queue
 
   const keyFor = (data) => String(keyOf(data) ?? '').trim();
@@ -124,14 +125,22 @@ export function createSheetTable({
       });
     },
 
-    async refresh() {
-      try {
-        // Retries stay quiet here: a failed refresh logs exactly one line, below.
-        apply(await retry(() => io.readAll(), 'read', { log: () => {} }));
-      } catch (err) {
-        const reason = err?.response?.status ?? err?.code ?? err?.message ?? String(err);
-        log(`⚠️ ${name} refresh failed: ${reason}`);
+    /** Callers that arrive while a refresh is running share it instead of reading again. */
+    refresh() {
+      if (!refreshing) {
+        refreshing = (async () => {
+          try {
+            // Retries stay quiet here: a failed refresh logs exactly one line, below.
+            apply(await retry(() => io.readAll(), 'read', { log: () => {} }));
+          } catch (err) {
+            const reason = err?.response?.status ?? err?.code ?? err?.message ?? String(err);
+            log(`⚠️ ${name} refresh failed: ${reason}`);
+          }
+        })().finally(() => {
+          refreshing = null;
+        });
       }
+      return refreshing;
     },
   };
 }

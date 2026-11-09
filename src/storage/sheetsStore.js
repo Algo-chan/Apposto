@@ -170,9 +170,10 @@ export async function createSheetsStore(config, { doc: openDoc } = {}) {
       await orders.add(asRead('Orders', order));
       return order;
     },
-    async getOrder(id) {
+    async getOrder(id, { refresh = true } = {}) {
       // On a miss read once more: after a deploy the old instance may still have written it.
-      return orders.getOrRefresh(id);
+      // refresh: false = memory only (for checks that expect a miss, like a brand-new order id).
+      return refresh ? orders.getOrRefresh(id) : orders.get(id);
     },
     async updateOrder(id, patch) {
       const merged = await orders.update(id, patchAsRead('Orders', patch));

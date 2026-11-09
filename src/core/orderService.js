@@ -30,7 +30,8 @@ export function createOrderService({ store, config, now = () => new Date() }) {
   async function placeOrder({ customer, merchant, summary, checkout }) {
     let id = newOrderId(now());
     // extremely unlikely collision, but check anyway
-    for (let i = 0; i < 3 && (await store.getOrder(id)); i++) id = newOrderId(now());
+    // Memory only: a new id almost always misses, and a miss must not re-read the whole sheet.
+    for (let i = 0; i < 3 && (await store.getOrder(id, { refresh: false })); i++) id = newOrderId(now());
 
     const ts = localTimestamp(now());
     const commissionPct = Number.isFinite(merchant.commissionPct)
