@@ -1,6 +1,7 @@
 // Merchant, rider and admin actions.
 import { InlineKeyboard } from 'grammy';
 import { t } from '../i18n.js';
+import { th, HTML } from './html.js';
 import {
   STATUS,
   OrderError,
@@ -14,7 +15,7 @@ import {
 } from '../core/orders.js';
 import { merchantGuard, riderGuard } from '../core/orderService.js';
 import { estimateRide } from '../core/eta.js';
-import { merchantAccounts, customerFees, distanceText } from './ui.js';
+import { merchantAccountsHtml, customerFees, distanceText } from './ui.js';
 import { replyError, stampMessage } from './notify.js';
 import { ratingKeyboard } from './reviews.js';
 
@@ -56,12 +57,24 @@ export function registerOps(bot, { store, service, config, notify, insights }) {
     const { merchant, lang } = await resolveMerchantActor(ctx, orderId);
     const order = await service.accept(orderId, merchant.id, finalFoodTotal);
     const cLang = order.customerLang;
-    await notify.toCustomer(order, 'payNow', {
-      merchant: merchant.names[cLang] || merchant.names.en,
-      food: formatMoney(order.foodTotal),
-      accounts: merchantAccounts(merchant, cLang),
-      fees: customerFees(order),
-    });
+    const payText = th(
+      cLang,
+      'payNow',
+      {
+        merchant: merchant.names[cLang] || merchant.names.en,
+        food: formatMoney(order.foodTotal),
+        accounts: merchantAccountsHtml(merchant, cLang),
+        tapToCopy: t(cLang, 'payTapToCopy'),
+        fees: customerFees(order),
+      },
+      { raw: ['accounts'] }
+    );
+    const payKb = new InlineKeyboard()
+      .text(t(cLang, 'btnWhereRef'), `payhelp:${order.id}`)
+      .row()
+      .text(t(cLang, 'btnCallShop'), `callshop:${order.id}`)
+      .text(t(cLang, 'btnCancelOrder'), `ccancel:${order.id}`);
+    await notify.send(order.customerId, payText, { ...HTML, reply_markup: payKb });
     await ctx.reply(t(lang, 'mAccepted', { food: formatMoney(order.foodTotal) }));
     await notify.dispatch(`✅ ${order.id} accepted by ${merchant.names.en} · food ${formatMoney(order.foodTotal)}`);
   }

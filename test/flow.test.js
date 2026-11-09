@@ -5,13 +5,14 @@ import { createBot } from '../src/bot/createBot.js';
 import { createMemoryStore } from '../src/storage/memoryStore.js';
 import { loadConfig } from '../src/config.js';
 import { t } from '../src/i18n.js';
+import path from 'node:path';
 import { createImageCache } from '../src/render/imageCache.js';
 
 const BOT = { id: 999999, is_bot: true, first_name: 'Bot', username: 'test_bot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false };
 const CUSTOMER = 100, MERCHANT = 200, RIDER = 300, RIDER2 = 301, ADMIN = 500, STRANGER = 666, GROUP = -1001;
 
 /** realImages: render real PNG cards (slower); default is a tiny fake picture. */
-function setup({ failPhoto = false, realImages = false } = {}) {
+function setup({ failPhoto = false, realImages = false, accountName = 'Abebe K' } = {}) {
   const origWarn = console.warn;
   console.warn = () => {};
   const { config } = loadConfig({
@@ -21,7 +22,7 @@ function setup({ failPhoto = false, realImages = false } = {}) {
   const store = createMemoryStore({
     merchants: [{
       id: 'M1', nameEn: 'Burger House', nameOm: 'Mana Baargarii', nameAm: 'በርገር ቤት', telegramId: String(MERCHANT),
-      phone: '0911111111', lang: 'om', telebirr: '0911111111', cbeAccount: '1000123', accountName: 'Abebe K',
+      phone: '0911111111', lang: 'om', telebirr: '0911111111', cbeAccount: '1000123', accountName,
       commissionPct: 8, lat: 7.2, lng: 38.6, active: true,
     }],
     menu: [
@@ -138,9 +139,9 @@ test('happy path: order -> accept -> pay -> confirm -> rider -> delivered, with 
   assert.equal(o.status, 'ACCEPTED');
   assert.equal(o.commission, 50); // 8% of 620 = 49.6
   const payMsg = h.lastTo(CUSTOMER).text;
-  assert.match(payMsg, /Pay 620 Br to the shop/);
-  assert.match(payMsg, /Telebirr: 0911111111/);
-  assert.match(payMsg, /Pay 70 Br/); // 60 delivery + 10 service
+  assert.match(payMsg, /Send 620 Br to the shop/);
+  assert.match(payMsg, /Telebirr: <code>0911111111<\/code>/);
+  assert.match(payMsg, /70 Br cash/); // 60 delivery + 10 service
 
   // shop presses Accept twice -> no double processing
   await h.tap(MERCHANT, `macc:${id}`);
@@ -232,7 +233,7 @@ test('custom request: shop sets the final price', async () => {
   assert.equal(o.status, 'ACCEPTED');
   assert.equal(o.foodTotal, 450);
   assert.equal(o.commission, 36);
-  assert.match(h.lastTo(CUSTOMER).text, /Pay 450 Br/);
+  assert.match(h.lastTo(CUSTOMER).text, /Send 450 Br/);
 });
 
 test('out of range for bicycles is refused before ordering', async () => {
@@ -830,4 +831,51 @@ test('summary: "Almost done" brings back the bottom menu; Edit returns to the me
   assert.equal(orders.length, 1);
   assert.equal(orders[0].foodTotal, 250);
   assert.equal(orders[0].landmark, 'Near the bus station');
+});
+
+test('payment guide: tap-to-copy accounts, escaped names, help and call buttons', async () => {
+  const h = setup({ accountName: 'Abebe & Sons' });
+  const id = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `macc:${id}`);
+  const pay = h.lastTo(CUSTOMER);
+  assert.equal(pay.parse_mode, 'HTML');
+  assert.match(pay.text, /<code>0911111111<\/code>/);
+  assert.match(pay.text, /<code>1000123<\/code>/);
+  assert.match(pay.text, /Abebe &amp; Sons/);
+  assert.deepEqual(h.buttons(pay), [`payhelp:${id}`, `callshop:${id}`, `ccancel:${id}`]);
+  assert.equal(pay.reply_markup.inline_keyboard[0].length, 1);
+});
+
+test('payment guide: payhelp falls back to text, uses the picture when the file exists', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `macc:${id}`);
+  h.config.paymentGuidePath = path.join('assets', 'images', 'no-such-file.png');
+  let mark = h.calls.length;
+  await h.tap(STRANGER, `payhelp:${id}`);
+  let out = h.outTo(STRANGER, mark);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].method, 'sendMessage');
+  assert.match(out[0].payload.text, /FT/);
+  assert.match(out[0].payload.text, /127/);
+  h.config.paymentGuidePath = path.join('assets', 'images', 'logo.png');
+  mark = h.calls.length;
+  await h.tap(CUSTOMER, `payhelp:${id}`);
+  out = h.outTo(CUSTOMER, mark);
+  assert.deepEqual(out.map((c) => c.method), ['sendPhoto']);
+  assert.match(out[0].payload.caption, /FT/);
+});
+
+test('payment guide: callshop is for the order customer only', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `macc:${id}`);
+  const mark = h.calls.length;
+  await h.tap(CUSTOMER, `callshop:${id}`);
+  const out = h.outTo(CUSTOMER, mark);
+  assert.equal(out.length, 1);
+  assert.match(out[0].payload.text, /Burger House: 0911111111/);
+  await h.tap(STRANGER, `callshop:${id}`);
+  assert.match(h.lastAlert().text, /not allowed/);
+  assert.equal(h.outTo(STRANGER).length, 0);
 });

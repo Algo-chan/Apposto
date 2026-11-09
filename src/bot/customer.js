@@ -1,8 +1,10 @@
 // Customer flow: language -> shop -> items -> location -> landmark -> phone -> confirm -> pay ref.
-import { InlineKeyboard, Keyboard } from 'grammy';
+import fs from 'node:fs';
+import { InlineKeyboard, InputFile, Keyboard } from 'grammy';
 import { t, allTexts, statusLabel } from '../i18n.js';
 import {
   STATUS,
+  OrderError,
   CUSTOMER_CANCELLABLE,
   summarizeCart,
   roadDistanceKm,
@@ -22,7 +24,6 @@ import {
   merchantsKeyboard,
   renderMenu,
   renderSummary,
-  merchantAccounts,
   itemLines,
   foodText,
   distanceText,
@@ -440,6 +441,36 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     }
   });
 
+  // ---------- payment guide ----------
+  pm.callbackQuery(/^payhelp:(.+)$/, async (ctx) => {
+    const lang = L(ctx);
+    await ctx.answerCallbackQuery().catch(() => {});
+    const text = t(lang, 'payGuideText');
+    const file = config.paymentGuidePath;
+    if (file && fs.existsSync(file)) {
+      try {
+        return await ctx.replyWithPhoto(new InputFile(file), { caption: text, ...HTML });
+      } catch (err) {
+        console.error('payment guide photo failed:', err.description || err.message);
+      }
+    }
+    return ctx.reply(text, HTML);
+  });
+
+  pm.callbackQuery(/^callshop:(.+)$/, async (ctx) => {
+    const lang = L(ctx);
+    try {
+      const order = await store.getOrder(ctx.match[1]);
+      if (!order) throw new OrderError('NOT_FOUND');
+      customerGuard(ctx.from.id)(order);
+      const merchant = await store.getMerchant(order.merchantId);
+      await ctx.answerCallbackQuery();
+      return ctx.reply(th(lang, 'shopPhoneLine', { name: merchant?.names[lang] || order.merchantName, phone: merchant?.phone || config.supportPhone }), HTML);
+    } catch (err) {
+      return replyError(ctx, err, lang);
+    }
+  });
+
   // ---------- free text (custom request, landmark, phone, payment reference) ----------
   pm.on('message:text', async (ctx) => {
     const lang = L(ctx);
@@ -490,7 +521,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     } catch (err) {
       return replyError(ctx, err, lang);
     }
-    await ctx.reply(t(lang, 'refReceived'));
+    await ctx.reply(t(lang, 'refReceived'), HTML);
 
     const merchant = await store.getMerchant(order.merchantId);
     const mLang = merchant.lang || 'en';
@@ -508,4 +539,4 @@ export function registerCustomer(bot, { store, service, config, notify, insights
   }
 }
 
-export { merchantAccounts };
+

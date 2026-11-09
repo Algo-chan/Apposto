@@ -124,12 +124,13 @@ export function renderSummary({ merchant, summary, checkout, serviceFee, lang, e
   ].join('\n');
 }
 
-export function merchantAccounts(merchant, lang) {
+/** Shop accounts as HTML: numbers in <code> so Telegram offers tap-to-copy. */
+export function merchantAccountsHtml(merchant, lang) {
   const lines = [];
-  if (merchant.telebirr) lines.push(`📱 Telebirr: ${merchant.telebirr}`);
-  if (merchant.cbeAccount) lines.push(`🏦 CBE: ${merchant.cbeAccount}`);
-  if (merchant.accountName) lines.push(`👤 ${t(lang, 'accountName')}: ${merchant.accountName}`);
-  if (lines.length === 0) lines.push(`📞 ${merchant.phone}`);
+  if (merchant.telebirr) lines.push(`📱 Telebirr: <code>${esc(merchant.telebirr)}</code>`);
+  if (merchant.cbeAccount) lines.push(`🏦 CBE: <code>${esc(merchant.cbeAccount)}</code>`);
+  if (lines.length === 0) lines.push(`📞 <code>${esc(merchant.phone)}</code>`);
+  if (merchant.accountName) lines.push(`👤 ${esc(t(lang, 'accountName'))}: ${esc(merchant.accountName)}`);
   return lines.join('\n');
 }
 

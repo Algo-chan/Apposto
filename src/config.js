@@ -93,6 +93,8 @@ export function loadConfig(env = process.env) {
     dispatchChatId: env.DISPATCH_CHAT_ID || '',
     adminIds: idList(env, 'ADMIN_IDS'),
     supportPhone: env.SUPPORT_PHONE || '',
+    // Screenshot shown by the "Where do I find the reference?" button (text is used if the file is missing)
+    paymentGuidePath: env.PAYMENT_GUIDE_PATH || 'assets/images/payment-guide.png',
     brandName: env.BRAND_NAME || 'Delivery',
 
     // Money (birr)

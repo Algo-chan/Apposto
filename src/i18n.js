@@ -161,10 +161,41 @@ const S = {
     om: 'Dhiifama 🙏 {merchant} amma ajaja {id} fudhachuu hin danda\'u. Maaloo suuqii biraa yaalaa.',
     am: 'ይቅርታ 🙏 {merchant} አሁን ትዕዛዝ {id}ን መቀበል አይችልም። እባክዎ ሌላ ሱቅ ይሞክሩ።',
   },
+  // Oromo and Amharic payment-guide copy below is a careful draft: needs native review.
   payNow: {
-    en: '✅ {merchant} accepted order {id}!\n\n1️⃣ Pay {food} to the shop:\n{accounts}\n\n2️⃣ Then send the transaction reference number here (e.g. CK12AB34CD).\n\n🚲 Pay {fees} (delivery + service) to the rider in cash when it arrives.',
-    om: '✅ {merchant} ajaja {id} fudhateera!\n\n1️⃣ {food} suuqiif kaffalaa:\n{accounts}\n\n2️⃣ Achiis lakkoofsa ragaa kaffaltii (transaction reference) asitti ergaa (fkn. CK12AB34CD).\n\n🚲 Yeroo ajajni dhufu {fees} (geejjibaa fi tajaajila) geessaaf maallaqa harkaan kaffalaa.',
-    am: '✅ {merchant} ትዕዛዝ {id}ን ተቀብሏል!\n\n1️⃣ {food} ለሱቁ ይክፈሉ፦\n{accounts}\n\n2️⃣ ከዚያ የግብይት ማጣቀሻ ቁጥሩን (transaction reference) እዚህ ይላኩ (ለምሳሌ CK12AB34CD)።\n\n🚲 ትዕዛዙ ሲደርስ {fees} (ማድረሻና አገልግሎት) ለአድራሹ በጥሬ ገንዘብ ይክፈሉ።',
+    en: '<b>✅ {merchant} accepted your order!</b>\n▰▰▱  Payment · 2 easy steps\n\n<b>1️⃣ Send {food} to the shop</b>\n{accounts}\n{tapToCopy}\n\n<b>2️⃣ Send the reference number here</b>\nIt\'s in the SMS you get after paying, e.g. <code>CK12AB34CD</code>\n\n🚲 Have <b>{fees} cash</b> ready for the rider.',
+    om: '<b>✅ {merchant} ajaja keessan fudhateera!</b>\n▰▰▱  Kaffaltii · tarkaanfii 2\n\n<b>1️⃣ {food} suuqiif kaffalaa</b>\n{accounts}\n{tapToCopy}\n\n<b>2️⃣ Lakkoofsa ragaa kaffaltii asitti ergaa</b>\nErga kaffaltanii booda SMS argattan keessa jira, fkn. <code>CK12AB34CD</code>\n\n🚲 Yeroo ajajni dhufu <b>{fees}</b> geessaaf maallaqa harkaan qopheessaa.',
+    am: '<b>✅ {merchant} ትዕዛዝዎን ተቀብሏል!</b>\n▰▰▱  ክፍያ · 2 ቀላል ደረጃዎች\n\n<b>1️⃣ {food} ለሱቁ ይክፈሉ</b>\n{accounts}\n{tapToCopy}\n\n<b>2️⃣ የማጣቀሻ ቁጥሩን እዚህ ይላኩ</b>\nከከፈሉ በኋላ በሚደርስዎ SMS ውስጥ አለ፣ ለምሳሌ <code>CK12AB34CD</code>\n\n🚲 ትዕዛዙ ሲደርስ <b>{fees}</b> ለአድራሹ በጥሬ ገንዘብ ያዘጋጁ።',
+  },
+  payTapToCopy: {
+    en: '👆 Tap a number to copy it',
+    om: '👆 Lakkoofsa tuqaatii garagalchaa (copy)',
+    am: '👆 ቁጥሩን ነክተው ይቅዱት (copy)',
+  },
+  btnWhereRef: {
+    en: '❓ Where do I find the reference?',
+    om: '❓ Lakkoofsa ragaa eessatti argadha?',
+    am: '❓ የማጣቀሻ ቁጥሩን የት አገኛለሁ?',
+  },
+  btnCallShop: {
+    en: '📞 Call the shop',
+    om: '📞 Suuqiif bilbilaa',
+    am: '📞 ሱቁን ይደውሉ',
+  },
+  btnCancelOrder: {
+    en: '❌ Cancel order',
+    om: '❌ Ajaja haqi',
+    am: '❌ ትዕዛዝ ሰርዝ',
+  },
+  payGuideText: {
+    en: '<b>❓ Where is the reference number?</b>\n\n📱 <b>Telebirr:</b> after you pay, you get an SMS from 127 / Telebirr. It includes the transaction number (letters and digits, e.g. <code>CK12AB34CD</code>).\n\n🏦 <b>CBE Birr / CBE mobile banking:</b> the SMS or receipt shows a reference starting with <code>FT…</code>.\n\nCopy that code and send it here in this chat.',
+    om: '<b>❓ Lakkoofsi ragaa eessa jira?</b>\n\n📱 <b>Telebirr:</b> erga kaffaltanii booda SMS 127 / Telebirr irraa isiniif dhufa. Keessatti lakkoofsi tiraansaakshinii (qubee fi lakkoofsa, fkn. <code>CK12AB34CD</code>) argama.\n\n🏦 <b>CBE Birr / CBE mobile banking:</b> SMS yookaan rasiidiin lakkoofsa ragaa <code>FT…</code>n eegalu agarsiisa.\n\nLakkoofsa sana garagalchitanii (copy) asitti ergaa.',
+    am: '<b>❓ የማጣቀሻ ቁጥሩ የት ነው?</b>\n\n📱 <b>ቴሌብር፦</b> ከከፈሉ በኋላ ከ127 / Telebirr SMS ይደርስዎታል። በውስጡ የግብይት ቁጥሩ (ፊደላትና ቁጥሮች፣ ለምሳሌ <code>CK12AB34CD</code>) አለ።\n\n🏦 <b>CBE Birr / CBE mobile banking፦</b> SMS ወይም ደረሰኙ በ<code>FT…</code> የሚጀምር ማጣቀሻ ያሳያል።\n\nያንን ቁጥር ቀድተው እዚህ ይላኩ።',
+  },
+  shopPhoneLine: {
+    en: '📞 {name}: {phone}',
+    om: '📞 {name}: {phone}',
+    am: '📞 {name}: {phone}',
   },
   accountName: { en: 'Name', om: 'Maqaa', am: 'ስም' },
   badRef: {
@@ -178,9 +209,9 @@ const S = {
     am: '⚠️ ይህ የማጣቀሻ ቁጥር ለሌላ ትዕዛዝ ጥቅም ላይ ውሏል። እባክዎ ያረጋግጡ።',
   },
   refReceived: {
-    en: 'Got it ✅ The shop is checking your payment.',
-    om: 'Argameera ✅ Suuqiin kaffaltii keessan ilaalaa jira.',
-    am: 'ደርሶናል ✅ ሱቁ ክፍያዎን እያረጋገጠ ነው።',
+    en: '<b>Got it ✅</b> The shop is checking your payment.',
+    om: '<b>Argameera ✅</b> Suuqiin kaffaltii keessan ilaalaa jira.',
+    am: '<b>ደርሶናል ✅</b> ሱቁ ክፍያዎን እያረጋገጠ ነው።',
   },
   payConfirmed: {
     en: '💚 Payment confirmed! Your order {id} is being prepared.',
@@ -188,9 +219,9 @@ const S = {
     am: '💚 ክፍያዎ ተረጋግጧል! ትዕዛዝ {id} እየተዘጋጀ ነው።',
   },
   payNotFound: {
-    en: '⚠️ The shop could not find your payment for order {id}. Please check and send the correct reference number.',
-    om: '⚠️ Suuqiin kaffaltii ajaja {id} hin arganne. Maaloo ilaalaatii lakkoofsa ragaa sirrii ergaa.',
-    am: '⚠️ ሱቁ ለትዕዛዝ {id} ክፍያዎን አላገኘም። እባክዎ አረጋግጠው ትክክለኛውን የማጣቀሻ ቁጥር ይላኩ።',
+    en: '<b>⚠️ The shop could not find your payment for order {id}.</b>\nPlease check and send the correct reference number.',
+    om: '<b>⚠️ Suuqiin kaffaltii ajaja {id} hin arganne.</b>\nMaaloo ilaalaatii lakkoofsa ragaa sirrii ergaa.',
+    am: '<b>⚠️ ሱቁ ለትዕዛዝ {id} ክፍያዎን አላገኘም።</b>\nእባክዎ አረጋግጠው ትክክለኛውን የማጣቀሻ ቁጥር ይላኩ።',
   },
   riderAssigned: {
     en: '🚲 {rider} will deliver order {id}. Phone: {phone}',
