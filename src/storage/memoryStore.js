@@ -84,6 +84,9 @@ export function createMemoryStore(seed = {}) {
       return clone([...db.reviews.values()].filter((r) => !merchantId || r.merchantId === String(merchantId)));
     },
     clearCache() {},
+    missingColumns() {
+      return {};
+    },
     close() {},
     // test helpers
     _db: db,

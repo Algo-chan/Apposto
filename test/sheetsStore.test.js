@@ -2,17 +2,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSheetsStore } from '../src/storage/sheetsStore.js';
+import { createMemoryStore } from '../src/storage/memoryStore.js';
+import { TABS, headers } from '../src/storage/schema.js';
 
-/** Fake google-spreadsheet tab: rows are plain { header: value } objects, row 1 is the header. */
-function fakeSheet() {
+/**
+ * Fake google-spreadsheet tab: rows are plain { header: value } objects, row 1 is the header.
+ * Like the real library, a value for a header the sheet does not have is silently dropped.
+ */
+function fakeSheet(headerValues) {
   const rows = [];
+  const known = (obj) => Object.fromEntries(Object.entries(obj).filter(([h]) => headerValues.includes(h)));
   const wrap = (index) => {
     const data = rows[index];
     const pending = {};
     return {
       rowNumber: index + 2,
       get: (h) => (h in pending ? pending[h] : data[h]),
-      assign: (obj) => Object.assign(pending, obj),
+      assign: (obj) => Object.assign(pending, known(obj)),
       save: async () => {
         Object.assign(rows[index], pending);
       },
@@ -20,21 +26,25 @@ function fakeSheet() {
   };
   return {
     rows,
+    headerValues,
     async getRows({ offset = 0, limit = Infinity } = {}) {
       const out = [];
       for (let i = offset; i < rows.length && out.length < limit; i++) out.push(wrap(i));
       return out;
     },
     async addRow(obj) {
-      rows.push({ ...obj });
+      rows.push(known(obj));
       return wrap(rows.length - 1);
     },
   };
 }
 
-async function setup() {
-  const sheets = { Orders: fakeSheet(), Customers: fakeSheet(), Reviews: fakeSheet(), Merchants: fakeSheet(), Menu: fakeSheet(), Riders: fakeSheet() };
-  const store = await createSheetsStore({ cacheSeconds: 60 }, { doc: { sheetsByTitle: sheets } });
+/** without: { Tab: ['header', ...] } columns that tab's header row lacks (an old sheet). */
+async function setup({ without = {}, log } = {}) {
+  const sheets = Object.fromEntries(
+    Object.keys(TABS).map((name) => [name, fakeSheet(headers(name).filter((h) => !(without[name] || []).includes(h)))])
+  );
+  const store = await createSheetsStore({ cacheSeconds: 60 }, { doc: { sheetsByTitle: sheets }, log });
   return { sheets, store };
 }
 
@@ -76,4 +86,40 @@ test('getOrder with refresh off never reads the sheet on a miss', async () => {
   } finally {
     store.close();
   }
+});
+
+test('a sheet without a newer column is reported once at startup, with the fix', async () => {
+  const lines = [];
+  const { store } = await setup({ without: { Orders: ['tracker_msg_id'] }, log: (l) => lines.push(l) });
+  try {
+    assert.deepEqual(store.missingColumns(), { Orders: ['tracker_msg_id'] });
+    assert.deepEqual(lines, ['⚠️ Orders is missing columns: tracker_msg_id — run: npm run setup-sheet']);
+  } finally {
+    store.close();
+  }
+});
+
+test('every missing column of a tab goes on its one line', async () => {
+  const lines = [];
+  const { store } = await setup({ without: { Orders: ['tracker_msg_id', 'eta_max'], Riders: ['lang'] }, log: (l) => lines.push(l) });
+  try {
+    assert.deepEqual(store.missingColumns(), { Orders: ['eta_max', 'tracker_msg_id'], Riders: ['lang'] });
+    assert.equal(lines.length, 2);
+    assert.ok(lines.includes('⚠️ Orders is missing columns: eta_max, tracker_msg_id — run: npm run setup-sheet'));
+    assert.ok(lines.includes('⚠️ Riders is missing columns: lang — run: npm run setup-sheet'));
+  } finally {
+    store.close();
+  }
+});
+
+test('an up-to-date sheet logs nothing and reports no missing columns', async () => {
+  const lines = [];
+  const { store } = await setup({ log: (l) => lines.push(l) });
+  try {
+    assert.deepEqual(store.missingColumns(), {});
+    assert.deepEqual(lines, []);
+  } finally {
+    store.close();
+  }
+  assert.deepEqual(createMemoryStore().missingColumns(), {});
 });

@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
-import { TABS, fromRow, toRow, withNames } from './schema.js';
+import { TABS, headers, fromRow, toRow, withNames } from './schema.js';
 import { withRetry } from './retry.js';
 import { createSheetTable } from './sheetTable.js';
 
@@ -60,8 +60,46 @@ function patchAsRead(name, patch) {
   return out;
 }
 
-/** deps.doc: an already opened spreadsheet (tests pass a fake one). */
-export async function createSheetsStore(config, { doc: openDoc } = {}) {
+/**
+ * The tab's header row, or null when it can't be read. Orders/Customers/Reviews have theirs
+ * loaded already (by the first read); the others are read here once.
+ */
+async function headerRow(sheet) {
+  try {
+    return sheet.headerValues ?? null;
+  } catch {
+    /* not loaded yet */
+  }
+  try {
+    await sheet.loadHeaderRow();
+    return sheet.headerValues ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Columns the code uses that a tab's header row lacks: { Orders: ['tracker_msg_id'] }.
+ * google-spreadsheet silently drops values for unknown headers, so a missing column would lose
+ * data without a word: each such tab gets one loud log line.
+ */
+async function findMissingColumns(doc, log) {
+  const missing = {};
+  for (const name of Object.keys(TABS)) {
+    const sheet = doc.sheetsByTitle[name];
+    if (!sheet) continue; // a missing tab fails loudly on first use
+    const have = await headerRow(sheet);
+    if (!have) continue;
+    const lacks = headers(name).filter((h) => !have.includes(h));
+    if (lacks.length === 0) continue;
+    missing[name] = lacks;
+    log(`⚠️ ${name} is missing columns: ${lacks.join(', ')} — run: npm run setup-sheet`);
+  }
+  return missing;
+}
+
+/** deps.doc: an already opened spreadsheet (tests pass a fake one). deps.log: for warnings. */
+export async function createSheetsStore(config, { doc: openDoc, log = console.warn } = {}) {
   const doc = openDoc ?? (await openSpreadsheet(config));
   const ttl = config.cacheSeconds * 1000;
   const cache = new Map();
@@ -107,6 +145,7 @@ export async function createSheetsStore(config, { doc: openDoc } = {}) {
   const customers = table('Customers', 'id');
   const reviews = table('Reviews', 'orderId');
   await Promise.all([orders.load(), customers.load(), reviews.load()]);
+  const missing = await findMissingColumns(doc, log);
 
   let refreshing = false;
   async function refreshAll() {
@@ -211,6 +250,10 @@ export async function createSheetsStore(config, { doc: openDoc } = {}) {
     },
     clearCache() {
       cache.clear();
+    },
+    /** Columns the sheet lacks, found at startup: { Tab: ['header', ...] } (empty when up to date). */
+    missingColumns() {
+      return structuredClone(missing);
     },
     close() {
       clearInterval(timer);

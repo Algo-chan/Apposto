@@ -1175,3 +1175,26 @@ test('tracker: on admin cancel the shop and rider are told before the customer h
   assert.ok(headline > at(RIDER, /./) && at(RIDER, /./) >= 0, 'rider first');
   assert.equal(h.liveCards(CUSTOMER).length, 0);
 });
+
+test('tracker: a store that cannot keep the card id (old sheet) still leaves one live card', async () => {
+  const h = setup();
+  const update = h.store.updateOrder;
+  // like a sheet without the tracker_msg_id column: the card id is never kept
+  h.store.updateOrder = async (oid, patch) => {
+    const { trackerMsgId, ...rest } = patch;
+    return Object.keys(rest).length ? update(oid, rest) : h.store.getOrder(oid);
+  };
+  const id = await paidOrder(h);
+  await h.tap(RIDER, `take:${id}`, GROUP);
+  await h.tap(MERCHANT, `mready:${id}`);
+  await h.tap(RIDER, `rpick:${id}`);
+  await h.tap(RIDER, `rdone:${id}`);
+  assert.equal((await h.order(id)).trackerMsgId || '', '', 'the store really dropped it');
+  assert.equal(h.cardsTo(CUSTOMER).length, 6);
+  assert.deepEqual(h.liveCards(CUSTOMER), [h.cardsTo(CUSTOMER).at(-1).result.message_id]);
+
+  // closing deletes the last card too
+  const id2 = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `mrej:${id2}`);
+  assert.deepEqual(h.liveCards(CUSTOMER), [h.cardsTo(CUSTOMER).at(-2).result.message_id], 'only the delivered card of the first order');
+});

@@ -14,6 +14,10 @@ import { customerFees } from './ui.js';
 export function createTracker({ api, store, notify, config, insights }) {
   const log = (what, id, err) => console.error(`tracker ${what} ${id}: ${err?.description || err?.message || err}`);
   const inFlight = new Set(); // tracker work not finished yet (callers may not await it)
+  // orderId -> the last card id this process sent. Used besides order.trackerMsgId, so the old
+  // card is still deleted when the store could not keep the id (a sheet without the
+  // tracker_msg_id column, or a failed save).
+  const lastCard = new Map();
 
   /** Run one change of an order's card under its lock; remembered until it is done. */
   function locked(order, fn) {
@@ -82,15 +86,19 @@ export function createTracker({ api, store, notify, config, insights }) {
   }
 
   async function deleteCard(order) {
-    if (!order.trackerMsgId) return;
-    try {
-      await api.deleteMessage(order.customerId, Number(order.trackerMsgId));
-    } catch {
-      /* already gone, or too old to delete (48 h): the new card still goes out */
+    const ids = new Set([order.trackerMsgId, lastCard.get(order.id)].filter(Boolean).map(String));
+    for (const id of ids) {
+      try {
+        await api.deleteMessage(order.customerId, Number(id));
+      } catch {
+        /* already gone, or too old to delete (48 h): the new card still goes out */
+      }
     }
   }
 
   async function saveCardId(order, id) {
+    if (id) lastCard.set(order.id, id);
+    else lastCard.delete(order.id);
     if ((order.trackerMsgId || '') === id) return;
     try {
       await store.updateOrder(order.id, { trackerMsgId: id });
