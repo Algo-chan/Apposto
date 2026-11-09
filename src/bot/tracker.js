@@ -13,6 +13,21 @@ import { customerFees } from './ui.js';
 
 export function createTracker({ api, store, notify, config, insights }) {
   const log = (what, id, err) => console.error(`tracker ${what} ${id}: ${err?.description || err?.message || err}`);
+  const inFlight = new Set(); // tracker work not finished yet (callers may not await it)
+
+  /** Run one change of an order's card under its lock; remembered until it is done. */
+  function locked(order, fn) {
+    const run = withLock(`tracker:${order.id}`, fn);
+    inFlight.add(run);
+    const done = () => inFlight.delete(run);
+    run.then(done, done);
+    return run;
+  }
+
+  /** Resolves when all tracker work started so far (and anything it queued) has finished. */
+  async function idle() {
+    while (inFlight.size) await Promise.allSettled([...inFlight]);
+  }
 
   /** The latest saved order (the caller's copy may be older, e.g. without the card id). */
   async function reread(order) {
@@ -96,7 +111,7 @@ export function createTracker({ api, store, notify, config, insights }) {
   }
 
   function update(order, { headline = null } = {}) {
-    return withLock(`tracker:${order.id}`, async () => {
+    return locked(order, async () => {
       try {
         const cur = await reread(order);
         const lang = normLang(cur.customerLang);
@@ -113,7 +128,7 @@ export function createTracker({ api, store, notify, config, insights }) {
 
   /** Rejected / cancelled: remove the card, send the headline, forget the card id. */
   function close(order, headline) {
-    return withLock(`tracker:${order.id}`, async () => {
+    return locked(order, async () => {
       try {
         const cur = await reread(order);
         await deleteCard(cur);
@@ -125,5 +140,5 @@ export function createTracker({ api, store, notify, config, insights }) {
     });
   }
 
-  return { update, close };
+  return { update, close, idle };
 }

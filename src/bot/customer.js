@@ -371,10 +371,6 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     }
 
     await appendLine(ctx, `📨 ${order.id}`);
-    // Headline (with the bottom menu back) + the first live card
-    ctx.session.menuShown = true;
-    const placed = th(lang, 'orderPlaced', { id: order.id, merchant: merchant.names[lang] });
-    await tracker.update(order, { headline: { text: placed, other: { reply_markup: mainMenu(lang) } } });
 
     // Notify the shop (in the shop's language) with Accept / Reject
     const mLang = merchant.lang || 'en';
@@ -400,6 +396,12 @@ export function registerCustomer(bot, { store, service, config, notify, insights
       ].join('\n'),
       { reply_markup: new InlineKeyboard().text('❌ Cancel (admin)', `acancel:${order.id}`) }
     );
+
+    // Headline (with the bottom menu back) + the first live card. Not awaited and sent last: a
+    // slow first render must not hold up the shop or the dispatch group.
+    ctx.session.menuShown = true;
+    const placed = th(lang, 'orderPlaced', { id: order.id, merchant: merchant.names[lang] });
+    void tracker.update(order, { headline: { text: placed, other: { reply_markup: mainMenu(lang) } } });
   });
 
   // ---------- my orders & cancel ----------
@@ -433,10 +435,10 @@ export function registerCustomer(bot, { store, service, config, notify, insights
       });
       await ctx.answerCallbackQuery();
       await appendLine(ctx, `${statusLabel(lang, STATUS.CANCELLED)} · ${order.id}`);
-      await tracker.close(order, th(order.customerLang, 'orderCancelled', { id: order.id }));
       const merchant = await store.getMerchant(order.merchantId);
       if (merchant) await notify.toMerchant(merchant, 'mCancelled', { id: order.id });
       await notify.dispatch(`❌ ${order.id} cancelled by customer`);
+      void tracker.close(order, th(order.customerLang, 'orderCancelled', { id: order.id }));
     } catch (err) {
       if (err.cantCancel) {
         return ctx.answerCallbackQuery({ text: t(lang, 'cantCancel', { phone: config.supportPhone }), show_alert: true });

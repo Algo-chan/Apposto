@@ -11,8 +11,12 @@ import { createImageCache } from '../src/render/imageCache.js';
 const BOT = { id: 999999, is_bot: true, first_name: 'Bot', username: 'test_bot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false };
 const CUSTOMER = 100, MERCHANT = 200, RIDER = 300, RIDER2 = 301, ADMIN = 500, STRANGER = 666, GROUP = -1001;
 
-/** realImages: render real PNG cards (slower); default is a tiny fake picture. */
-function setup({ failPhoto = false, failDelete = false, realImages = false, accountName = 'Abebe K' } = {}) {
+/**
+ * realImages: render real PNG cards (slower); default is a tiny fake picture.
+ * slowRenderMs: the fake picture takes this long to render (a slow host).
+ * awaitTracker: every send/tap also waits for the tracker work it started (the card).
+ */
+function setup({ failPhoto = false, failDelete = false, realImages = false, slowRenderMs = 0, awaitTracker = true, accountName = 'Abebe K' } = {}) {
   const origWarn = console.warn;
   console.warn = () => {};
   const { config } = loadConfig({
@@ -34,11 +38,16 @@ function setup({ failPhoto = false, failDelete = false, realImages = false, acco
       { telegramId: String(RIDER2), name: 'Lensa', phone: '0933333333', lang: 'om', active: true },
     ],
   });
-  const images = realImages ? undefined : createImageCache({ render: () => Buffer.from('png') });
+  const fakeRender = slowRenderMs
+    ? () => new Promise((r) => setTimeout(() => r(Buffer.from('png')), slowRenderMs))
+    : () => Buffer.from('png');
+  const images = realImages ? undefined : createImageCache({ render: fakeRender });
   const { bot, tracker } = createBot({ config, store, botInfo: BOT, images, warmImages: false });
   const calls = [];
   const blocked = new Set(); // chat ids that never pressed Start
   let mid = 5000;
+  let failWhen = null; // (method, payload) => true: that call fails once with a 400
+  const failOnce = (pred) => { failWhen = pred; };
   bot.api.config.use(async (_prev, method, payload) => {
     const call = { method, payload };
     calls.push(call);
@@ -47,6 +56,10 @@ function setup({ failPhoto = false, failDelete = false, realImages = false, acco
     return res;
   });
   async function fakeApi(method, payload) {
+    if (failWhen?.(method, payload)) {
+      failWhen = null;
+      return { ok: false, error_code: 400, description: 'Bad Request: test failure' };
+    }
     if (method === 'deleteMessage' && failDelete) {
       return { ok: false, error_code: 400, description: 'Bad Request: message to delete not found' };
     }
@@ -73,6 +86,7 @@ function setup({ failPhoto = false, failDelete = false, realImages = false, acco
       message.entities = [{ type: 'bot_command', offset: 0, length: fields.text.split(' ')[0].length }];
     }
     await bot.handleUpdate({ update_id: uid++, message });
+    if (awaitTracker) await tracker.idle?.();
   }
   const text = (from, t, chatId = from) => send(from, chatId, { text: t });
   async function tap(from, data, chatId = from, messageText = 'msg') {
@@ -80,6 +94,7 @@ function setup({ failPhoto = false, failDelete = false, realImages = false, acco
       update_id: uid++,
       callback_query: { id: String(uid), from: user(from), chat_instance: 'x', data, message: { message_id: 1, date: 0, chat: chatOf(chatId), from: BOT, text: messageText } },
     });
+    if (awaitTracker) await tracker.idle?.();
   }
   const sentTo = (chatId) => calls.filter((c) => c.method === 'sendMessage' && String(c.payload.chat_id) === String(chatId));
   const lastTo = (chatId) => sentTo(chatId).at(-1)?.payload;
@@ -124,7 +139,7 @@ function setup({ failPhoto = false, failDelete = false, realImages = false, acco
     return cardsTo(chatId).map((c) => c.result.message_id).filter((m) => !gone.has(m));
   };
 
-  return { bot, store, calls, blocked, text, send, tap, sentTo, photosTo, outTo, lastTo, lastAlert, buttons, lastEdit, order, latestOrder, placeOrder, config, tracker, cardsTo, deletedIn, liveCards };
+  return { bot, store, calls, blocked, failOnce, text, send, tap, sentTo, photosTo, outTo, lastTo, lastAlert, buttons, lastEdit, order, latestOrder, placeOrder, config, tracker, cardsTo, deletedIn, liveCards };
 }
 
 test('happy path: order -> accept -> pay -> confirm -> rider -> delivered, with attack attempts', async () => {
@@ -1091,4 +1106,72 @@ test('tracker: callrider gives the order customer the rider phone, nobody else',
   await h.tap(STRANGER, `callrider:${id}`);
   assert.match(h.lastAlert().text, /not allowed/);
   assert.equal(h.outTo(STRANGER).length, 0);
+});
+
+test('tracker: a slow card render does not hold up the shop, rider and dispatch messages', async () => {
+  const h = setup({ slowRenderMs: 300, awaitTracker: false });
+  const at = (pred, from) => h.calls.findIndex((c, i) => i >= from && pred(c));
+  const msgTo = (chat, re) => (c) => c.method === 'sendMessage' && String(c.payload.chat_id) === String(chat) && re.test(c.payload.text);
+  const card = (c) => c.method === 'sendPhoto' && String(c.payload.chat_id) === String(CUSTOMER);
+  /** run() returns before the card is rendered; every `first` message is sent before the card. */
+  async function step(label, run, firsts) {
+    const mark = h.calls.length;
+    await run();
+    assert.equal(at(card, mark), -1, `${label}: the handler did not wait for the card`);
+    await h.tracker.idle();
+    const cardAt = at(card, mark);
+    assert.ok(cardAt >= 0, `${label}: the card was sent`);
+    for (const [name, pred] of firsts) {
+      const i = at(pred, mark);
+      assert.ok(i >= 0 && i < cardAt, `${label}: ${name} (#${i}) before the card (#${cardAt})`);
+    }
+  }
+
+  await upToSummary(h);
+  await h.tracker.idle();
+  let id;
+  await step('place order', async () => {
+    await h.tap(CUSTOMER, 'confirm');
+    id = (await h.store.listOrders({ customerId: CUSTOMER })).at(-1).id;
+  }, [
+    ['shop new order', msgTo(MERCHANT, /Ajaja haaraa/)],
+    ['dispatch new order', msgTo(GROUP, /^🆕/)],
+  ]);
+  await step('accept', () => h.tap(MERCHANT, `macc:${id}`), [
+    ['shop accepted', msgTo(MERCHANT, /./)],
+    ['dispatch accepted', msgTo(GROUP, /accepted by/)],
+  ]);
+  await h.text(CUSTOMER, 'CK12AB34CD');
+  await step('payment confirmed', () => h.tap(MERCHANT, `mpay:${id}`), [
+    ['shop start preparing', msgTo(MERCHANT, /qopheessuu jalqabaa/)],
+    ['rider job post', msgTo(GROUP, /New delivery/)],
+  ]);
+  await step('rider takes it', () => h.tap(RIDER, `take:${id}`, GROUP), [
+    ['rider job details', msgTo(RIDER, /./)],
+    ['shop rider coming', msgTo(MERCHANT, /Kebede/)],
+  ]);
+  await h.tap(MERCHANT, `mready:${id}`);
+  await step('picked up', () => h.tap(RIDER, `rpick:${id}`), [['shop picked up', msgTo(MERCHANT, /fudhatameera/)]]);
+
+  // delivered: the card (awaited) still comes before the rating question
+  const mark = h.calls.length;
+  await h.tap(RIDER, `rdone:${id}`);
+  await h.tracker.idle();
+  const rating = at((c) => c.method === 'sendMessage' && h.buttons(c.payload).includes(`rf:${id}:5`), mark);
+  assert.ok(at(card, mark) >= 0 && at(card, mark) < rating, 'delivered card before the rating question');
+});
+
+test('tracker: on admin cancel the shop and rider are told before the customer headline', async () => {
+  const h = setup({ awaitTracker: false });
+  const id = await paidOrder(h);
+  await h.tap(RIDER, `take:${id}`, GROUP);
+  await h.tracker.idle();
+  const mark = h.calls.length;
+  await h.tap(ADMIN, `acancel:${id}`, GROUP);
+  await h.tracker.idle();
+  const at = (chat, re) => h.calls.findIndex((c, i) => i >= mark && c.method === 'sendMessage' && String(c.payload.chat_id) === String(chat) && re.test(c.payload.text));
+  const headline = at(CUSTOMER, /cancelled/);
+  assert.ok(headline > at(MERCHANT, /haqameera/) && at(MERCHANT, /haqameera/) >= 0, 'shop first');
+  assert.ok(headline > at(RIDER, /./) && at(RIDER, /./) >= 0, 'rider first');
+  assert.equal(h.liveCards(CUSTOMER).length, 0);
 });
