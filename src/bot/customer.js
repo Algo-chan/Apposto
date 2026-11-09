@@ -27,7 +27,7 @@ import {
   foodText,
   distanceText,
 } from './ui.js';
-import { replyError, stampMessage } from './notify.js';
+import { replyError, appendLine } from './notify.js';
 
 const L = (ctx) => ctx.session.lang || 'en';
 
@@ -266,7 +266,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
   pm.callbackQuery('cancelcart', async (ctx) => {
     resetFlow(ctx);
     await ctx.answerCallbackQuery();
-    await stampMessage(ctx, t(L(ctx), 'cartCancelled'));
+    await appendLine(ctx, t(L(ctx), 'cartCancelled'));
     return useMenu(ctx);
   });
 
@@ -299,7 +299,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
       console.error(`save customer ${ctx.from.id} failed: ${err.message}`);
     }
 
-    await stampMessage(ctx, `📨 ${order.id}`);
+    await appendLine(ctx, `📨 ${order.id}`);
     await ctx.reply(t(lang, 'orderPlaced', { id: order.id, merchant: merchant.names[lang] }), {
       reply_markup: mainMenu(lang),
     });
@@ -360,7 +360,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
         }
       });
       await ctx.answerCallbackQuery();
-      await stampMessage(ctx, t(lang, 'orderCancelled', { id: order.id }));
+      await appendLine(ctx, t(lang, 'orderCancelled', { id: order.id }));
       const merchant = await store.getMerchant(order.merchantId);
       if (merchant) await notify.toMerchant(merchant, 'mCancelled', { id: order.id });
       await notify.dispatch(`❌ ${order.id} cancelled by customer`);
