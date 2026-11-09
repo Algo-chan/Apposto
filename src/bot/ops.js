@@ -19,7 +19,7 @@ import { merchantAccountsHtml, customerFees, distanceText } from './ui.js';
 import { replyError, stampMessage } from './notify.js';
 import { ratingKeyboard } from './reviews.js';
 
-export function registerOps(bot, { store, service, config, notify, insights }) {
+export function registerOps(bot, { store, service, config, notify, insights, tracker }) {
   const isAdmin = (userId) => config.adminIds.includes(String(userId));
 
   /**
@@ -77,6 +77,9 @@ export function registerOps(bot, { store, service, config, notify, insights }) {
     await notify.send(order.customerId, payText, { ...HTML, reply_markup: payKb });
     await ctx.reply(t(lang, 'mAccepted', { food: formatMoney(order.foodTotal) }));
     await notify.dispatch(`✅ ${order.id} accepted by ${merchant.names.en} · food ${formatMoney(order.foodTotal)}`);
+    // The payment message above is this stage's headline; the card (maybe a first render) comes
+    // last so the shop's confirmation is not held up by it.
+    await tracker.update(order, { headline: null });
   }
 
   bot.callbackQuery(/^macc:(.+)$/, (ctx) =>
@@ -114,7 +117,7 @@ export function registerOps(bot, { store, service, config, notify, insights }) {
       const order = await service.transition(ctx.match[1], STATUS.REJECTED, {}, merchantGuard(merchant.id));
       await ctx.answerCallbackQuery();
       await stampMessage(ctx, t(lang, 'mRejectedAck'));
-      await notify.toCustomer(order, 'orderRejected', { merchant: merchant.names[order.customerLang] });
+      await tracker.close(order, th(order.customerLang, 'orderRejected', { id: order.id, merchant: merchant.names[order.customerLang] }));
       await notify.dispatch(`🚫 ${order.id} rejected by ${merchant.names.en}`);
     })
   );
@@ -132,10 +135,7 @@ export function registerOps(bot, { store, service, config, notify, insights }) {
       );
       await ctx.answerCallbackQuery();
       await stampMessage(ctx, t(lang, 'btnPaid'));
-      await notify.send(
-        order.customerId,
-        `${t(order.customerLang, 'payConfirmed', { id: order.id })}\n\n${t(order.customerLang, 'etaConfirmed', eta)}`
-      );
+      await tracker.update(order, { headline: th(order.customerLang, 'hlPaid', { id: order.id, ...eta }) });
 
       const readyKb = new InlineKeyboard().text(t(merchant.lang || 'en', 'btnReady'), `mready:${order.id}`);
       await notify.toMerchant(merchant, 'mStartPreparing', { id: order.id }, { other: { reply_markup: readyKb }, fallback: true });
@@ -217,7 +217,9 @@ export function registerOps(bot, { store, service, config, notify, insights }) {
       await ctx.api.sendLocation(rider.telegramId, order.lat, order.lng).catch(() => {});
     }
     await stampMessage(ctx, `✅ Taken by ${rider.name}`);
-    await notify.toCustomer(order, 'riderAssigned', { rider: rider.name, phone: rider.phone });
+    await tracker.update(order, {
+      headline: th(order.customerLang, 'hlRider', { id: order.id, rider: rider.name, phone: rider.phone }),
+    });
     await notify.toMerchant(merchant, 'mRiderComing', { id: order.id, rider: rider.name, phone: rider.phone });
   });
 
@@ -231,14 +233,10 @@ export function registerOps(bot, { store, service, config, notify, insights }) {
         t(lang, 'btnPickedUp'),
         new InlineKeyboard().text(t(lang, 'btnDelivered'), `rdone:${order.id}`)
       );
-      await notify.send(
-        order.customerId,
-        `${t(order.customerLang, 'pickedUp', { id: order.id, fees: customerFees(order) })}\n${t(
-          order.customerLang,
-          'etaOnTheWay',
-          estimateRide(order.distanceKm, config)
-        )}`
-      );
+      const ride = estimateRide(order.distanceKm, config);
+      await tracker.update(order, {
+        headline: th(order.customerLang, 'hlComing', { id: order.id, fees: customerFees(order), ...ride }),
+      });
       const merchant = await store.getMerchant(order.merchantId);
       await notify.toMerchant(merchant, 'mPickedUp', { id: order.id });
     })
@@ -255,7 +253,7 @@ export function registerOps(bot, { store, service, config, notify, insights }) {
       const lang = await actorLang(ctx);
       await ctx.answerCallbackQuery();
       await stampMessage(ctx, t(lang, 'rDeliveredAck', { id: order.id, pay: formatMoney(order.riderPay) }));
-      await notify.toCustomer(order, 'delivered');
+      await tracker.update(order, { headline: th(order.customerLang, 'hlDone', { id: order.id }) });
       // Ask for a rating right away while the food is fresh in their mind
       const shop = await store.getMerchant(order.merchantId);
       await notify.send(
@@ -274,7 +272,7 @@ export function registerOps(bot, { store, service, config, notify, insights }) {
   async function adminCancel(ctx, orderId) {
     const order = await service.transition(orderId, STATUS.CANCELLED);
     const merchant = await store.getMerchant(order.merchantId);
-    await notify.toCustomer(order, 'orderCancelled');
+    await tracker.close(order, th(order.customerLang, 'orderCancelled', { id: order.id }));
     if (merchant) await notify.toMerchant(merchant, 'mCancelled', { id: order.id });
     await notify.toRider(order, 'rCancelled');
     return order;

@@ -9,13 +9,19 @@ import { createInsights } from './insights.js';
 import { registerReviews } from './reviews.js';
 import { t, LANGS } from '../i18n.js';
 import { createImageCache } from '../render/imageCache.js';
-import { bannerSvg, renderPng } from '../render/cards.js';
+import { bannerSvg, trackerSvg, renderPng } from '../render/cards.js';
+import { stageLabels } from '../core/tracker.js';
+import { createTracker } from './tracker.js';
 
 /**
- * Picture cards by kind. Cache keys pair with args: 'banner:<lang>' -> { kind: 'banner', lang }.
+ * Picture cards by kind. Cache keys pair with args: 'banner:<lang>' -> { kind: 'banner', lang },
+ * 'track:<lang>:<stage>:<eta>' -> { kind: 'tracker', lang, stage, eta }.
  * The SVG is built inside the cache job, so a cached picture costs nothing to send again.
  */
-export function renderCard({ kind, lang } = {}) {
+export function renderCard({ kind, lang, stage, eta } = {}) {
+  if (kind === 'tracker') {
+    return renderPng(trackerSvg({ title: t(lang, `cardTitle${stage}`), eta, stage, labels: stageLabels(lang) }));
+  }
   if (kind === 'banner') {
     return renderPng(
       bannerSvg({ slogan: t(lang, 'bannerSlogan'), tagline: t(lang, 'bannerTagline'), cta: t(lang, 'bannerCta') })
@@ -36,7 +42,8 @@ export function createBot({ config, store, botInfo, now, images, warmImages = tr
   if (warmImages) for (const lang of LANGS) images.png(`banner:${lang}`, { kind: 'banner', lang });
   const notify = createNotifier({ api: bot.api, store, config, images });
   const insights = createInsights({ store, config });
-  const deps = { store, service, config, notify, insights };
+  const tracker = createTracker({ api: bot.api, store, notify, config, insights });
+  const deps = { store, service, config, notify, insights, tracker };
 
   bot.api.config.use(telegramRetry());
 
@@ -82,5 +89,5 @@ export function createBot({ config, store, botInfo, now, images, warmImages = tr
     }
   });
 
-  return { bot, service, notify };
+  return { bot, service, notify, tracker };
 }

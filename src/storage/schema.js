@@ -77,6 +77,7 @@ export const TABS = {
     ['picked_up_at', 'pickedUpAt', 'str'],
     ['eta_min', 'etaMin', 'num'],
     ['eta_max', 'etaMax', 'num'],
+    ['tracker_msg_id', 'trackerMsgId', 'str'], // the customer's live tracker card (Telegram message id)
   ],
   Reviews: [
     ['order_id', 'orderId', 'str'],

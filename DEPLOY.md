@@ -185,6 +185,9 @@ git push
 Render redeploys automatically on push. Environment variables and the Google Sheet do not need
 to change.
 
+> **Live order tracker version:** Before this version goes live, run `npm run setup-sheet` once
+> (adds the `tracker_msg_id` column).
+
 ---
 
 ## Troubleshooting

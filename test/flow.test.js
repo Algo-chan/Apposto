@@ -12,7 +12,7 @@ const BOT = { id: 999999, is_bot: true, first_name: 'Bot', username: 'test_bot',
 const CUSTOMER = 100, MERCHANT = 200, RIDER = 300, RIDER2 = 301, ADMIN = 500, STRANGER = 666, GROUP = -1001;
 
 /** realImages: render real PNG cards (slower); default is a tiny fake picture. */
-function setup({ failPhoto = false, realImages = false, accountName = 'Abebe K' } = {}) {
+function setup({ failPhoto = false, failDelete = false, realImages = false, accountName = 'Abebe K' } = {}) {
   const origWarn = console.warn;
   console.warn = () => {};
   const { config } = loadConfig({
@@ -35,12 +35,21 @@ function setup({ failPhoto = false, realImages = false, accountName = 'Abebe K' 
     ],
   });
   const images = realImages ? undefined : createImageCache({ render: () => Buffer.from('png') });
-  const { bot } = createBot({ config, store, botInfo: BOT, images, warmImages: false });
+  const { bot, tracker } = createBot({ config, store, botInfo: BOT, images, warmImages: false });
   const calls = [];
   const blocked = new Set(); // chat ids that never pressed Start
   let mid = 5000;
   bot.api.config.use(async (_prev, method, payload) => {
-    calls.push({ method, payload });
+    const call = { method, payload };
+    calls.push(call);
+    const res = await fakeApi(method, payload);
+    call.result = res.result;
+    return res;
+  });
+  async function fakeApi(method, payload) {
+    if (method === 'deleteMessage' && failDelete) {
+      return { ok: false, error_code: 400, description: 'Bad Request: message to delete not found' };
+    }
     if (method === 'sendMessage' && blocked.has(String(payload.chat_id))) {
       return { ok: false, error_code: 403, description: "Forbidden: bot can't initiate conversation with a user" };
     }
@@ -53,7 +62,7 @@ function setup({ failPhoto = false, realImages = false, accountName = 'Abebe K' 
       return { ok: true, result: { message_id: mid++, date: 0, chat: { id: payload.chat_id, type: 'private' }, text: payload.text } };
     }
     return { ok: true, result: true };
-  });
+  }
 
   let uid = 1;
   const user = (id) => ({ id, is_bot: false, first_name: `U${id}` });
@@ -104,7 +113,18 @@ function setup({ failPhoto = false, realImages = false, accountName = 'Abebe K' 
     return all.at(-1).id;
   }
 
-  return { bot, store, calls, blocked, text, send, tap, sentTo, photosTo, outTo, lastTo, lastAlert, buttons, lastEdit, order, latestOrder, placeOrder, config };
+  /** Tracker cards sent to a chat (photo, or text when the picture failed): they carry the timeline. */
+  const cardsTo = (chatId) =>
+    outTo(chatId).filter((c) => (c.payload.caption ?? c.payload.text ?? '').match(/^(✅|🟢|⚪) /gmu)?.length === 6);
+  const deletedIn = (chatId) =>
+    calls.filter((c) => c.method === 'deleteMessage' && String(c.payload.chat_id) === String(chatId)).map((c) => c.payload.message_id);
+  /** Card message ids that were sent and never deleted. */
+  const liveCards = (chatId) => {
+    const gone = new Set(deletedIn(chatId));
+    return cardsTo(chatId).map((c) => c.result.message_id).filter((m) => !gone.has(m));
+  };
+
+  return { bot, store, calls, blocked, text, send, tap, sentTo, photosTo, outTo, lastTo, lastAlert, buttons, lastEdit, order, latestOrder, placeOrder, config, tracker, cardsTo, deletedIn, liveCards };
 }
 
 test('happy path: order -> accept -> pay -> confirm -> rider -> delivered, with attack attempts', async () => {
@@ -495,7 +515,7 @@ async function upToSummary(h, cust = CUSTOMER) {
 test('double tap on Place order creates one order', async () => {
   const h = setup();
   await upToSummary(h);
-  const welcomes = () => h.photosTo(CUSTOMER).length;
+  const welcomes = () => h.photosTo(CUSTOMER).filter((c) => /Welcome to/.test(c.payload.caption)).length;
   const before = welcomes();
   await Promise.all([h.tap(CUSTOMER, 'confirm'), h.tap(CUSTOMER, 'confirm')]);
   assert.equal((await h.store.listOrders({ customerId: CUSTOMER })).length, 1);
@@ -876,6 +896,199 @@ test('payment guide: callshop is for the order customer only', async () => {
   assert.equal(out.length, 1);
   assert.match(out[0].payload.text, /Burger House: 0911111111/);
   await h.tap(STRANGER, `callshop:${id}`);
+  assert.match(h.lastAlert().text, /not allowed/);
+  assert.equal(h.outTo(STRANGER).length, 0);
+});
+
+// ---------- live order tracker (kept headline + one live picture card) ----------
+
+/** Order paid and confirmed by the shop (stage 3). */
+async function paidOrder(h, cust = CUSTOMER) {
+  const id = await h.placeOrder(cust);
+  await h.tap(MERCHANT, `macc:${id}`);
+  await h.text(cust, `CK${String(Math.random()).slice(2, 10)}`);
+  await h.tap(MERCHANT, `mpay:${id}`);
+  return id;
+}
+
+/** Exactly one card is live, every older card was deleted, and it is the one the order remembers. */
+async function assertOneLiveCard(h, id, cust = CUSTOMER) {
+  const cards = h.cardsTo(cust).map((c) => c.result.message_id);
+  const live = h.liveCards(cust);
+  assert.equal(live.length, 1, `live cards: ${live}`);
+  assert.equal(live[0], cards.at(-1), 'the newest card is the live one');
+  assert.equal((await h.order(id)).trackerMsgId, String(live[0]));
+}
+
+test('tracker: placing an order sends the kept headline, then the stage 1 card', async () => {
+  const h = setup();
+  await upToSummary(h);
+  const mark = h.calls.length;
+  await h.tap(CUSTOMER, 'confirm');
+  const id = (await h.store.listOrders({ customerId: CUSTOMER })).at(-1).id;
+  const out = h.outTo(CUSTOMER, mark);
+  assert.deepEqual(out.map((c) => c.method), ['sendMessage', 'sendPhoto']);
+  assert.equal(out[0].payload.text, t('en', 'orderPlaced', { id, merchant: 'Burger House' }));
+  assert.equal(out[0].payload.reply_markup.is_persistent, true, 'the bottom menu comes back with it');
+  const card = out[1].payload;
+  assert.equal(card.parse_mode, 'HTML');
+  assert.match(card.caption, /^🟢 Sent to the shop/m);
+  assert.match(card.caption, /🕒 30–40 min/);
+  assert.match(card.caption, /70 Br cash/);
+  assert.deepEqual(h.buttons(card), ['menu:help'], 'no rider to call yet');
+  assert.equal((await h.order(id)).trackerMsgId, String(out[1].result.message_id));
+});
+
+test('tracker: every update deletes the previous card, so only one is live', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER);
+  const first = h.cardsTo(CUSTOMER).at(-1).result.message_id;
+  await h.tap(MERCHANT, `macc:${id}`);
+  assert.ok(h.deletedIn(CUSTOMER).includes(first), 'stage 1 card deleted on accept');
+  assert.match(h.cardsTo(CUSTOMER).at(-1).payload.caption, /^🟢 Shop accepted/m);
+  await assertOneLiveCard(h, id);
+
+  await h.text(CUSTOMER, 'CK12AB34CD');
+  const beforePay = h.cardsTo(CUSTOMER).at(-1).result.message_id;
+  const mark = h.calls.length;
+  await h.tap(MERCHANT, `mpay:${id}`);
+  assert.ok(h.deletedIn(CUSTOMER).includes(beforePay), 'previous card deleted on payment confirmed');
+  const out = h.outTo(CUSTOMER, mark);
+  assert.deepEqual(out.map((c) => c.method), ['sendMessage', 'sendPhoto']);
+  assert.match(out[0].payload.text, /Payment confirmed/);
+  assert.match(out[0].payload.text, /Estimated arrival: in about 30–40 min/);
+  assert.match(out[1].payload.caption, /^🟢 Payment confirmed/m);
+  await assertOneLiveCard(h, id);
+
+  await h.tap(RIDER, `take:${id}`, GROUP);
+  const riderCard = h.cardsTo(CUSTOMER).at(-1).payload;
+  assert.match(riderCard.caption, /<b>Kebede<\/b> · 📞 0922222222/);
+  assert.match(riderCard.caption, /^🟢 Rider assigned/m);
+  assert.match(riderCard.caption, /🕒 5–10 min/);
+  assert.deepEqual(h.buttons(riderCard), [`callrider:${id}`, 'menu:help']);
+  await h.tap(MERCHANT, `mready:${id}`);
+  await h.tap(RIDER, `rpick:${id}`);
+  assert.match(h.cardsTo(CUSTOMER).at(-1).payload.caption, /^🟢 On the way/m);
+  await h.tap(RIDER, `rdone:${id}`);
+  const done = h.cardsTo(CUSTOMER).at(-1).payload;
+  assert.doesNotMatch(done.caption, /[🟢⚪]/u);
+  assert.doesNotMatch(done.caption, /🕒/);
+  assert.deepEqual(h.buttons(done), ['menu:help']);
+  await assertOneLiveCard(h, id);
+  // the delivered headline and card come before the rating question
+  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), [1, 2, 3, 4, 5].map((n) => `rf:${id}:${n}`));
+  assert.equal(h.cardsTo(CUSTOMER).length, 6);
+});
+
+test('tracker: a rider taking the job and the shop marking ready at the same time leave one card', async () => {
+  const h = setup();
+  const id = await paidOrder(h);
+  await Promise.all([h.tap(RIDER, `take:${id}`, GROUP), h.tap(MERCHANT, `mready:${id}`)]);
+  const o = await h.order(id);
+  assert.equal(o.status, 'READY');
+  assert.equal(o.riderId, String(RIDER));
+  await assertOneLiveCard(h, id);
+  assert.match(h.cardsTo(CUSTOMER).at(-1).payload.caption, /^🟢 Rider assigned/m);
+});
+
+test('tracker: updates of one order at the same moment still leave one card', async () => {
+  const h = setup();
+  const id = await paidOrder(h);
+  const o = await h.order(id);
+  await Promise.all([1, 2, 3].map(() => h.tracker.update(o, { headline: null })));
+  await assertOneLiveCard(h, id);
+});
+
+test('tracker: a card that cannot be deleted does not stop the new one', async () => {
+  const h = setup({ failDelete: true });
+  const id = await h.placeOrder(CUSTOMER);
+  const first = h.cardsTo(CUSTOMER).at(-1).result.message_id;
+  await h.tap(MERCHANT, `macc:${id}`);
+  assert.ok(h.deletedIn(CUSTOMER).includes(first));
+  const cards = h.cardsTo(CUSTOMER);
+  assert.equal(cards.length, 2);
+  assert.equal((await h.order(id)).trackerMsgId, String(cards[1].result.message_id));
+});
+
+test('tracker: when the picture fails, the card arrives as text with the same timeline', async () => {
+  const h = setup({ failPhoto: true });
+  const origError = console.error;
+  console.error = () => {};
+  let id;
+  try {
+    id = await h.placeOrder(CUSTOMER);
+  } finally {
+    console.error = origError;
+  }
+  const card = h.lastTo(CUSTOMER);
+  assert.equal(card.parse_mode, 'HTML');
+  const { timeline } = await import('../src/core/tracker.js');
+  assert.ok(card.text.includes(timeline('en', 1)));
+  assert.deepEqual(h.buttons(card), ['menu:help']);
+  assert.equal((await h.order(id)).trackerMsgId, String(h.sentTo(CUSTOMER).at(-1).result.message_id));
+});
+
+test('tracker: failing to save the card id is logged and the shop action still works', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER);
+  const update = h.store.updateOrder;
+  h.store.updateOrder = async (oid, patch) => {
+    if ('trackerMsgId' in patch) throw new Error('Sheets down');
+    return update(oid, patch);
+  };
+  const origError = console.error;
+  const errors = [];
+  console.error = (...args) => errors.push(args.join(' '));
+  try {
+    await h.tap(MERCHANT, `macc:${id}`);
+  } finally {
+    console.error = origError;
+  }
+  assert.equal((await h.order(id)).status, 'ACCEPTED');
+  assert.equal(h.lastTo(MERCHANT).text, t('om', 'mAccepted', { food: '250 Br' }));
+  assert.equal(h.cardsTo(CUSTOMER).length, 2, 'the new card was still sent');
+  assert.ok(errors.some((e) => /Sheets down/.test(e)), 'the failure is logged');
+});
+
+test('tracker: shop reject and customer cancel delete the card and send the headline', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER);
+  const card = h.cardsTo(CUSTOMER).at(-1).result.message_id;
+  await h.tap(MERCHANT, `mrej:${id}`);
+  assert.ok(h.deletedIn(CUSTOMER).includes(card));
+  assert.match(h.lastTo(CUSTOMER).text, /can't take order/);
+  assert.equal(h.liveCards(CUSTOMER).length, 0);
+  assert.equal((await h.order(id)).trackerMsgId, '');
+
+  const id2 = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `macc:${id2}`);
+  const card2 = h.cardsTo(CUSTOMER).at(-1).result.message_id;
+  await h.tap(CUSTOMER, `ccancel:${id2}`);
+  assert.ok(h.deletedIn(CUSTOMER).includes(card2));
+  assert.equal(h.lastTo(CUSTOMER).text, t('en', 'orderCancelled', { id: id2 }));
+  assert.equal(h.liveCards(CUSTOMER).length, 0);
+  assert.equal((await h.order(id2)).trackerMsgId, '');
+});
+
+test('tracker: admin cancel deletes the card too', async () => {
+  const h = setup();
+  const id = await paidOrder(h);
+  await h.tap(ADMIN, `acancel:${id}`, GROUP);
+  assert.equal(h.liveCards(CUSTOMER).length, 0);
+  assert.match(h.lastTo(CUSTOMER).text, /cancelled/);
+});
+
+test('tracker: callrider gives the order customer the rider phone, nobody else', async () => {
+  const h = setup();
+  const id = await paidOrder(h);
+  await h.tap(RIDER, `take:${id}`, GROUP);
+  const mark = h.calls.length;
+  await h.tap(CUSTOMER, `callrider:${id}`);
+  const out = h.outTo(CUSTOMER, mark);
+  assert.equal(out.length, 1);
+  assert.match(out[0].payload.text, /Kebede/);
+  assert.match(out[0].payload.text, /0922222222/);
+  await h.tap(STRANGER, `callrider:${id}`);
   assert.match(h.lastAlert().text, /not allowed/);
   assert.equal(h.outTo(STRANGER).length, 0);
 });

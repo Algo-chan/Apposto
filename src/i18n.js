@@ -213,30 +213,10 @@ const S = {
     om: '<b>Argameera ✅</b> Suuqiin kaffaltii keessan ilaalaa jira.',
     am: '<b>ደርሶናል ✅</b> ሱቁ ክፍያዎን እያረጋገጠ ነው።',
   },
-  payConfirmed: {
-    en: '💚 Payment confirmed! Your order {id} is being prepared.',
-    om: '💚 Kaffaltiin mirkanaa\'eera! Ajajni {id} keessan qophaa\'aa jira.',
-    am: '💚 ክፍያዎ ተረጋግጧል! ትዕዛዝ {id} እየተዘጋጀ ነው።',
-  },
   payNotFound: {
     en: '<b>⚠️ The shop could not find your payment for order {id}.</b>\nPlease check and send the correct reference number.',
     om: '<b>⚠️ Suuqiin kaffaltii ajaja {id} hin arganne.</b>\nMaaloo ilaalaatii lakkoofsa ragaa sirrii ergaa.',
     am: '<b>⚠️ ሱቁ ለትዕዛዝ {id} ክፍያዎን አላገኘም።</b>\nእባክዎ አረጋግጠው ትክክለኛውን የማጣቀሻ ቁጥር ይላኩ።',
-  },
-  riderAssigned: {
-    en: '🚲 {rider} will deliver order {id}. Phone: {phone}',
-    om: '🚲 {rider} ajaja {id} isinii geessa. Bilbila: {phone}',
-    am: '🚲 {rider} ትዕዛዝ {id}ን ያደርስልዎታል። ስልክ፦ {phone}',
-  },
-  pickedUp: {
-    en: '🚲 Order {id} is on the way! Have {fees} ready for the rider.',
-    om: '🚲 Ajajni {id} karaa irra jira! {fees} geessaaf qopheessaa.',
-    am: '🚲 ትዕዛዝ {id} በመንገድ ላይ ነው! {fees} ለአድራሹ ያዘጋጁ።',
-  },
-  delivered: {
-    en: '✅ Order {id} delivered. Thank you! 💚',
-    om: '✅ Ajajni {id} isiniif geessameera. Galatoomaa! 💚',
-    am: '✅ ትዕዛዝ {id} ደርሷል። እናመሰግናለን! 💚',
   },
   noOrders: { en: 'You have no orders yet.', om: 'Ammatti ajaja hin qabdan.', am: 'እስካሁን ትዕዛዝ የለዎትም።' },
   myOrdersTitle: { en: '📦 Your recent orders:', om: '📦 Ajajawwan keessan dhihoo:', am: '📦 የቅርብ ጊዜ ትዕዛዞችዎ፦' },
@@ -262,15 +242,62 @@ const S = {
     om: '🕒 Yeroo geejjibaa: gara daqiiqaa {min}–{max}',
     am: '🕒 የማድረሻ ጊዜ፦ ከ{min}–{max} ደቂቃ ገደማ',
   },
-  etaConfirmed: {
-    en: '🕒 Estimated arrival: in about {min}–{max} min',
-    om: '🕒 Gahiinsa tilmaamame: daqiiqaa {min}–{max} keessatti',
-    am: '🕒 የሚደርስበት ግምት፦ በ{min}–{max} ደቂቃ ውስጥ',
+
+  // ---------- live order tracker ----------
+  // Oromo and Amharic tracker copy below is a careful draft: needs native review.
+  // Bar labels under the picture card (short: 6 fit side by side)
+  stageSent: { en: 'Sent', om: 'Ergameera', am: 'ተልኳል' },
+  stageAccepted: { en: 'Accepted', om: 'Fudhateera', am: 'ተቀብሏል' },
+  stagePaid: { en: 'Paid', om: 'Kaffalameera', am: 'ተከፍሏል' },
+  stageRider: { en: 'Rider', om: 'Geessaa', am: 'አድራሽ' },
+  stageComing: { en: 'Coming', om: 'Karaa irra', am: 'በመንገድ ላይ' },
+  stageDone: { en: 'Done', om: 'Geessameera', am: 'ደርሷል' },
+  // Big title on the picture card, per stage
+  cardTitle1: { en: 'Waiting for the shop', om: 'Suuqii eegaa jirra', am: 'ሱቁን በመጠበቅ ላይ' },
+  cardTitle2: { en: 'Waiting for your payment', om: 'Kaffaltii keessan eegaa', am: 'ክፍያዎን በመጠበቅ ላይ' },
+  cardTitle3: { en: 'Preparing your food', om: 'Nyaanni qophaa\'aa jira', am: 'ምግብዎ እየተዘጋጀ ነው' },
+  cardTitle4: { en: 'A rider is assigned', om: 'Geessaan argameera', am: 'አድራሽ ተመድቧል' },
+  cardTitle5: { en: 'On the way to you', om: 'Gara keessanitti dhufaa jira', am: 'ወደ እርስዎ እየመጣ ነው' },
+  cardTitle6: { en: 'Delivered · thank you!', om: 'Geessameera · galatoomaa!', am: 'ደርሷል · እናመሰግናለን!' },
+  // Timeline lines in the card caption (✅ done, 🟢 now, ⚪ to come)
+  timeline1: { en: 'Sent to the shop', om: 'Suuqiif ergameera', am: 'ወደ ሱቁ ተልኳል' },
+  timeline2: { en: 'Shop accepted · you pay the shop', om: 'Suuqiin fudhateera · suuqiif kaffalaa', am: 'ሱቁ ተቀብሏል · ለሱቁ ይክፈሉ' },
+  timeline3: { en: 'Payment confirmed · preparing', om: 'Kaffaltiin mirkanaa\'eera · qophaa\'aa jira', am: 'ክፍያ ተረጋግጧል · እየተዘጋጀ ነው' },
+  timeline4: { en: 'Rider assigned', om: 'Geessaan argameera', am: 'አድራሽ ተመድቧል' },
+  timeline5: { en: 'On the way to you', om: 'Gara keessanitti karaa irra', am: 'ወደ እርስዎ በመንገድ ላይ' },
+  timeline6: { en: 'Delivered', om: 'Geessameera', am: 'ደርሷል' },
+  etaRange: { en: '{min}–{max} min', om: 'daqiiqaa {min}–{max}', am: '{min}–{max} ደቂቃ' },
+  cashReady: {
+    en: '🚲 Have <b>{cash} cash</b> ready for the rider.',
+    om: '🚲 <b>{cash}</b> geessaaf maallaqa harkaan qopheessaa.',
+    am: '🚲 <b>{cash}</b> ለአድራሹ በጥሬ ገንዘብ ያዘጋጁ።',
   },
-  etaOnTheWay: {
-    en: '⏱ Arriving in about {min}–{max} min.',
-    om: '⏱ Daqiiqaa {min}–{max} keessatti ni gaha.',
-    am: '⏱ በ{min}–{max} ደቂቃ ውስጥ ይደርሳል።',
+  btnCallRider: { en: '📞 Call rider', om: '📞 Geessaa bilbilaa', am: '📞 አድራሹን ይደውሉ' },
+  riderPhoneLine: {
+    en: '🚲 Your rider <b>{name}</b>: {phone}',
+    om: '🚲 Geessaan keessan <b>{name}</b>: {phone}',
+    am: '🚲 አድራሽዎ <b>{name}</b>፦ {phone}',
+  },
+  // Headlines: short messages that stay in the chat above the live card (HTML)
+  hlPaid: {
+    en: '<b>💚 Payment confirmed!</b> Your order {id} is being prepared.\n🕒 Estimated arrival: in about {min}–{max} min',
+    om: '<b>💚 Kaffaltiin mirkanaa\'eera!</b> Ajajni {id} keessan qophaa\'aa jira.\n🕒 Gahiinsa tilmaamame: daqiiqaa {min}–{max} keessatti',
+    am: '<b>💚 ክፍያዎ ተረጋግጧል!</b> ትዕዛዝ {id} እየተዘጋጀ ነው።\n🕒 የሚደርስበት ግምት፦ በ{min}–{max} ደቂቃ ውስጥ',
+  },
+  hlRider: {
+    en: '🚲 <b>{rider}</b> will deliver order {id}. Phone: {phone}',
+    om: '🚲 <b>{rider}</b> ajaja {id} isinii geessa. Bilbila: {phone}',
+    am: '🚲 <b>{rider}</b> ትዕዛዝ {id}ን ያደርስልዎታል። ስልክ፦ {phone}',
+  },
+  hlComing: {
+    en: '<b>🚲 Order {id} is on the way!</b> Have {fees} ready for the rider.\n⏱ Arriving in about {min}–{max} min.',
+    om: '<b>🚲 Ajajni {id} karaa irra jira!</b> {fees} geessaaf qopheessaa.\n⏱ Daqiiqaa {min}–{max} keessatti ni gaha.',
+    am: '<b>🚲 ትዕዛዝ {id} በመንገድ ላይ ነው!</b> {fees} ለአድራሹ ያዘጋጁ።\n⏱ በ{min}–{max} ደቂቃ ውስጥ ይደርሳል።',
+  },
+  hlDone: {
+    en: '<b>✅ Order {id} delivered.</b> Thank you! 💚',
+    om: '<b>✅ Ajajni {id} isiniif geessameera.</b> Galatoomaa! 💚',
+    am: '<b>✅ ትዕዛዝ {id} ደርሷል።</b> እናመሰግናለን! 💚',
   },
 
   // ---------- reviews ----------

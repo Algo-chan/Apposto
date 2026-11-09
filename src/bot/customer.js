@@ -34,7 +34,7 @@ import { th, HTML } from './html.js';
 
 const L = (ctx) => ctx.session.lang || 'en';
 
-export function registerCustomer(bot, { store, service, config, notify, insights }) {
+export function registerCustomer(bot, { store, service, config, notify, insights, tracker }) {
   const pm = bot.chatType('private');
 
   // ---------- helpers ----------
@@ -371,7 +371,10 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     }
 
     await appendLine(ctx, `📨 ${order.id}`);
-    await replyKeyboard(ctx, t(lang, 'orderPlaced', { id: order.id, merchant: merchant.names[lang] }), mainMenu(lang));
+    // Headline (with the bottom menu back) + the first live card
+    ctx.session.menuShown = true;
+    const placed = th(lang, 'orderPlaced', { id: order.id, merchant: merchant.names[lang] });
+    await tracker.update(order, { headline: { text: placed, other: { reply_markup: mainMenu(lang) } } });
 
     // Notify the shop (in the shop's language) with Accept / Reject
     const mLang = merchant.lang || 'en';
@@ -429,7 +432,8 @@ export function registerCustomer(bot, { store, service, config, notify, insights
         }
       });
       await ctx.answerCallbackQuery();
-      await appendLine(ctx, t(lang, 'orderCancelled', { id: order.id }));
+      await appendLine(ctx, `${statusLabel(lang, STATUS.CANCELLED)} · ${order.id}`);
+      await tracker.close(order, th(order.customerLang, 'orderCancelled', { id: order.id }));
       const merchant = await store.getMerchant(order.merchantId);
       if (merchant) await notify.toMerchant(merchant, 'mCancelled', { id: order.id });
       await notify.dispatch(`❌ ${order.id} cancelled by customer`);
@@ -466,6 +470,20 @@ export function registerCustomer(bot, { store, service, config, notify, insights
       const merchant = await store.getMerchant(order.merchantId);
       await ctx.answerCallbackQuery();
       return ctx.reply(th(lang, 'shopPhoneLine', { name: merchant?.names[lang] || order.merchantName, phone: merchant?.phone || config.supportPhone }), HTML);
+    } catch (err) {
+      return replyError(ctx, err, lang);
+    }
+  });
+
+  pm.callbackQuery(/^callrider:(.+)$/, async (ctx) => {
+    const lang = L(ctx);
+    try {
+      const order = await store.getOrder(ctx.match[1]);
+      if (!order) throw new OrderError('NOT_FOUND');
+      customerGuard(ctx.from.id)(order);
+      if (!order.riderId) throw new OrderError('NOT_FOUND');
+      await ctx.answerCallbackQuery();
+      return ctx.reply(th(lang, 'riderPhoneLine', { name: order.riderName, phone: order.riderPhone }), HTML);
     } catch (err) {
       return replyError(ctx, err, lang);
     }
