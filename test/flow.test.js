@@ -439,11 +439,12 @@ test('desktop user: inline menu, Skip button, pasted location — full order wit
   await h.tap(CUSTOMER, 'm:M1');
   await h.tap(CUSTOMER, 'add:I1');
   await h.tap(CUSTOMER, 'checkout');
-  // desktop hint with inline Skip
+  // the computer tip is part of the one location message (no separate message)
   assert.match(h.lastTo(CUSTOMER).text, /On a computer/);
-  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), ['skiploc']);
+  // an inline Skip on an older message still works
   await h.tap(CUSTOMER, 'skiploc');
-  assert.match(h.lastTo(CUSTOMER).text, /type your answer/);
+  assert.match(h.lastTo(CUSTOMER).text, /Step 3 of 4/);
+  assert.match(h.lastTo(CUSTOMER).text, /What's near you/);
   await h.text(CUSTOMER, 'Near the bus station, green gate');
   await h.text(CUSTOMER, '0911234567');
   await h.tap(CUSTOMER, 'confirm');
@@ -693,4 +694,140 @@ test('welcome: the real banner is uploaded once, then sent again by file_id', as
   const [first, second] = h.photosTo(CUSTOMER).map((c) => c.payload.photo);
   assert.equal(typeof first, 'object', 'first send uploads the PNG');
   assert.equal(typeof second, 'string', 'second send reuses the file_id');
+});
+
+// ---------- guided checkout (Step N of 4, Back, Cancel, Edit) ----------
+
+/** Walk one customer to the location step (cart: one Burger). Returns the call count before checkout. */
+async function upToLocation(h, cust = CUSTOMER) {
+  await h.text(cust, '/start');
+  await h.tap(cust, 'lang:en');
+  await h.text(cust, '🛍 Order');
+  await h.tap(cust, 'm:M1');
+  await h.tap(cust, 'add:I1');
+  const mark = h.calls.length;
+  await h.tap(cust, 'checkout');
+  return mark;
+}
+const replyTexts = (payload) => (payload?.reply_markup?.keyboard || []).flat().map((b) => b.text);
+
+test('checkout: the location step is one message with GPS, Skip, Back and Cancel buttons', async () => {
+  const h = setup();
+  const mark = await upToLocation(h);
+  const out = h.outTo(CUSTOMER, mark);
+  assert.equal(out.length, 1, 'one message for the location step');
+  const msg = out[0].payload;
+  assert.equal(msg.parse_mode, 'HTML');
+  assert.ok(msg.text.startsWith('▰▰▱▱  Step 2 of 4\n'));
+  assert.match(msg.text, /<b>📍 Where should we deliver\?<\/b>/);
+  const kb = msg.reply_markup.keyboard.flat();
+  assert.ok(kb.some((b) => b.request_location === true), 'has a request_location button');
+  assert.deepEqual(replyTexts(msg), ['📍 Send my location', '⏭ Skip', '⬅️ Back', '❌ Cancel']);
+  assert.equal(msg.reply_markup.resize_keyboard, true);
+});
+
+test('checkout: Back from the landmark step sends the location step again', async () => {
+  const h = setup();
+  await upToLocation(h);
+  await h.text(CUSTOMER, '⏭ Skip');
+  const landmark = h.lastTo(CUSTOMER);
+  assert.match(landmark.text, /Step 3 of 4/);
+  assert.deepEqual(replyTexts(landmark), ['⬅️ Back', '❌ Cancel']);
+  const mark = h.calls.length;
+  await h.text(CUSTOMER, '⬅️ Back');
+  const out = h.outTo(CUSTOMER, mark);
+  assert.equal(out.length, 1);
+  assert.match(out[0].payload.text, /Step 2 of 4/);
+  assert.ok(out[0].payload.reply_markup.keyboard.flat().some((b) => b.request_location));
+  // the flow continues normally from there
+  await h.send(CUSTOMER, CUSTOMER, { location: { latitude: 7.205, longitude: 38.6 } });
+  assert.match(h.lastTo(CUSTOMER).text, /Step 3 of 4/);
+});
+
+test('checkout: Back from the phone step returns to the landmark step; Back from location returns to the menu', async () => {
+  const h = setup();
+  await upToLocation(h);
+  await h.text(CUSTOMER, '⏭ Skip');
+  await h.text(CUSTOMER, 'Near Abyssinia bank, blue gate');
+  const phone = h.lastTo(CUSTOMER);
+  assert.match(phone.text, /Step 4 of 4/);
+  assert.deepEqual(replyTexts(phone), ['📞 Send my number', '⬅️ Back', '❌ Cancel']);
+  assert.ok(phone.reply_markup.keyboard.flat().some((b) => b.request_contact));
+  await h.text(CUSTOMER, '⬅️ Back');
+  assert.match(h.lastTo(CUSTOMER).text, /Step 3 of 4/);
+  await h.text(CUSTOMER, '⬅️ Back');
+  assert.match(h.lastTo(CUSTOMER).text, /Step 2 of 4/);
+
+  // location -> menu, as a new message, cart kept, bottom menu back
+  const mark = h.calls.length;
+  await h.text(CUSTOMER, '⬅️ Back');
+  const out = h.outTo(CUSTOMER, mark);
+  assert.equal(out.at(-1).method, 'sendMessage');
+  const menu = out.at(-1).payload;
+  assert.match(menu.text, /Step 1 of 4/);
+  assert.match(menu.text, /1 × Burger = 250 Br/);
+  assert.ok(h.buttons(menu).includes('rem:I1'));
+  assert.ok(out.some((c) => c.payload.reply_markup?.is_persistent === true), 'bottom menu shown again');
+  // and checkout works again with the same cart
+  await h.tap(CUSTOMER, 'checkout');
+  assert.match(h.lastTo(CUSTOMER).text, /Step 2 of 4/);
+});
+
+test('checkout: Cancel on the phone step clears the cart and shows home', async () => {
+  const h = setup();
+  await upToLocation(h);
+  await h.text(CUSTOMER, '⏭ Skip');
+  await h.text(CUSTOMER, 'Near Abyssinia bank, blue gate');
+  const photos = h.photosTo(CUSTOMER).length;
+  await h.text(CUSTOMER, '❌ Cancel');
+  assert.equal(h.photosTo(CUSTOMER).length, photos + 1, 'home screen sent');
+  assert.match(h.photosTo(CUSTOMER).at(-1).payload.caption, /Welcome to/);
+  assert.equal(h.lastTo(CUSTOMER).reply_markup.is_persistent, true, 'bottom menu is back');
+  await h.tap(CUSTOMER, 'checkout');
+  assert.equal(h.lastAlert().text, t('en', 'staleButton'));
+  assert.equal((await h.store.listOrders()).length, 0);
+});
+
+test('checkout: Back and Cancel outside checkout just point to the menu', async () => {
+  const h = setup();
+  await h.text(CUSTOMER, '/start');
+  await h.tap(CUSTOMER, 'lang:en');
+  await h.text(CUSTOMER, '⬅️ Back');
+  assert.equal(h.lastTo(CUSTOMER).text, t('en', 'useMenu'));
+  await h.text(CUSTOMER, '❌ Cancel');
+  assert.equal(h.lastTo(CUSTOMER).text, t('en', 'useMenu'));
+});
+
+test('summary: "Almost done" brings back the bottom menu; Edit returns to the menu with the cart kept', async () => {
+  const h = setup();
+  await upToSummary(h);
+  const sent = h.sentTo(CUSTOMER);
+  const almost = sent.at(-2).payload;
+  assert.equal(almost.text, '✅ Almost done!');
+  assert.equal(almost.reply_markup.is_persistent, true);
+  const summary = sent.at(-1).payload;
+  assert.equal(summary.parse_mode, 'HTML');
+  assert.match(summary.text, /💵 <b>70 Br<\/b> · cash to the rider/);
+  assert.deepEqual(summary.reply_markup.inline_keyboard.map((row) => row.map((b) => b.callback_data)), [['confirm'], ['edit', 'cancelcart']]);
+  assert.equal(summary.reply_markup.inline_keyboard[1][0].text, '✏️ Edit');
+
+  await h.tap(CUSTOMER, 'edit');
+  const menu = h.lastEdit();
+  assert.equal(menu.parse_mode, 'HTML');
+  assert.match(menu.text, /Step 1 of 4/);
+  assert.match(menu.text, /1 × Burger = 250 Br/);
+  assert.ok(h.buttons(menu).includes('rem:I1'));
+  // the old summary's Place order no longer works: checkout details were cleared
+  await h.tap(CUSTOMER, 'confirm');
+  assert.equal((await h.store.listOrders()).length, 0);
+  // go through checkout again and place the order
+  await h.tap(CUSTOMER, 'checkout');
+  await h.text(CUSTOMER, '⏭ Skip');
+  await h.text(CUSTOMER, 'Near the bus station');
+  await h.text(CUSTOMER, '0911234567');
+  await h.tap(CUSTOMER, 'confirm');
+  const orders = await h.store.listOrders({ customerId: CUSTOMER });
+  assert.equal(orders.length, 1);
+  assert.equal(orders[0].foodTotal, 250);
+  assert.equal(orders[0].landmark, 'Near the bus station');
 });

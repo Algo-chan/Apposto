@@ -26,6 +26,7 @@ import {
   itemLines,
   foodText,
   distanceText,
+  progressLine,
 } from './ui.js';
 import { replyError, appendLine } from './notify.js';
 import { th, HTML } from './html.js';
@@ -51,9 +52,9 @@ export function registerCustomer(bot, { store, service, config, notify, insights
    * Send a message that sets or removes the reply keyboard, and remember whether the customer now
    * has the bottom menu. mainMenu is the only persistent keyboard; any other one replaces it.
    */
-  function replyKeyboard(ctx, text, reply_markup) {
+  function replyKeyboard(ctx, text, reply_markup, other = {}) {
     ctx.session.menuShown = reply_markup?.is_persistent === true;
-    return ctx.reply(text, { reply_markup });
+    return ctx.reply(text, { ...other, reply_markup });
   }
   /**
    * Home screen. The bottom menu (reply keyboard, handy on phones) needs a text message, so a short
@@ -73,15 +74,15 @@ export function registerCustomer(bot, { store, service, config, notify, insights
   function useMenu(ctx) {
     return ctx.reply(t(L(ctx), 'useMenu'), { reply_markup: homeInline(L(ctx)) });
   }
-  async function editOrReply(ctx, text, reply_markup) {
+  async function editOrReply(ctx, text, reply_markup, other = {}) {
     if (ctx.callbackQuery?.message) {
       try {
-        return await ctx.editMessageText(text, { reply_markup });
+        return await ctx.editMessageText(text, { ...other, reply_markup });
       } catch (err) {
         if (String(err.description || '').includes('not modified')) return;
       }
     }
-    return ctx.reply(text, { reply_markup });
+    return ctx.reply(text, { ...other, reply_markup });
   }
   async function showMerchants(ctx) {
     const lang = L(ctx);
@@ -95,10 +96,10 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     const cart = ctx.session.cart;
     const merchant = await store.getMerchant(cart.merchantId);
     const menu = await activeMenu(cart.merchantId);
-    const eta = await insights.eta(merchant, null);
-    const { text, keyboard } = renderMenu({ merchant, menu, cart, lang, eta });
-    if (asNewMessage) return ctx.reply(text, { reply_markup: keyboard });
-    return editOrReply(ctx, text, keyboard);
+    const [eta, rating] = await Promise.all([insights.eta(merchant, null), insights.rating(merchant.id)]);
+    const { text, keyboard } = renderMenu({ merchant, menu, cart, lang, eta, rating });
+    if (asNewMessage) return ctx.reply(text, { ...HTML, reply_markup: keyboard });
+    return editOrReply(ctx, text, keyboard, HTML);
   }
   async function stale(ctx) {
     await ctx.answerCallbackQuery({ text: t(L(ctx), 'staleButton'), show_alert: true });
@@ -214,21 +215,34 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     return askLocation(ctx);
   });
 
-  async function askLocation(ctx) {
+  // ---------- checkout steps 2-4: one message each, Back / Cancel in the bottom keyboard ----------
+  const STEP_NUMBER = { location: 2, landmark: 3, phone: 4 };
+  function withBackCancel(kb, lang) {
+    return kb.text(t(lang, 'btnStepBack')).text(t(lang, 'btnStepCancel')).resized();
+  }
+  function sendStep(ctx, step, key, keyboard) {
     const lang = L(ctx);
-    const kb = new Keyboard()
-      .requestLocation(t(lang, 'btnShareLocation'))
-      .row()
-      .text(t(lang, 'btnSkip'))
-      .resized()
-      .oneTime();
-    await replyKeyboard(ctx, t(lang, 'askLocation'), kb);
-    // Telegram Desktop can't share GPS and often hides reply buttons: give an inline Skip + paste option
-    return ctx.reply(t(lang, 'locDesktopHint'), {
-      reply_markup: new InlineKeyboard().text(t(lang, 'btnSkip'), 'skiploc'),
-    });
+    return replyKeyboard(ctx, `${progressLine(lang, STEP_NUMBER[step])}\n${t(lang, key)}`, keyboard, HTML);
+  }
+  /** Step 2. The computer tip (paste a link / coordinates, or Skip) is part of the same message. */
+  function askLocation(ctx) {
+    const lang = L(ctx);
+    ctx.session.step = 'location';
+    const kb = new Keyboard().requestLocation(t(lang, 'btnShareLocation')).row().text(t(lang, 'btnSkip')).row();
+    return sendStep(ctx, 'location', 'askLocation', withBackCancel(kb, lang).oneTime());
+  }
+  function askLandmark(ctx) {
+    ctx.session.step = 'landmark';
+    return sendStep(ctx, 'landmark', 'askLandmark', withBackCancel(new Keyboard(), L(ctx)));
+  }
+  function askPhone(ctx) {
+    const lang = L(ctx);
+    ctx.session.step = 'phone';
+    const kb = new Keyboard().requestContact(t(lang, 'btnSharePhone')).row();
+    return sendStep(ctx, 'phone', 'askPhone', withBackCancel(kb, lang).oneTime());
   }
 
+  // Inline Skip: no longer sent, kept so the button on older messages still works.
   pm.callbackQuery('skiploc', async (ctx) => {
     await ctx.answerCallbackQuery();
     if (ctx.session.step !== 'location' || !ctx.session.cart) return;
@@ -254,8 +268,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
       return replyKeyboard(ctx, t(lang, 'outOfRange', { km: distanceKm, max: config.maxKm }), mainMenu(lang));
     }
     ctx.session.checkout = { lat, lng, distanceKm, deliveryFee: fee };
-    ctx.session.step = 'landmark';
-    return replyKeyboard(ctx, t(lang, 'askLandmark'), { remove_keyboard: true });
+    return askLandmark(ctx);
   }
 
   pm.on('message:contact', async (ctx) => {
@@ -275,10 +288,50 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     const summary = summarizeCart(cart, new Map(menu.map((i) => [i.id, i])), lang);
     const eta = await insights.eta(merchant, ctx.session.checkout.distanceKm);
     const text = renderSummary({ merchant, summary, checkout: ctx.session.checkout, serviceFee: config.serviceFee, lang, eta });
-    const kb = new InlineKeyboard().text(t(lang, 'btnConfirm'), 'confirm').row().text(t(lang, 'btnCancel'), 'cancelcart');
-    await replyKeyboard(ctx, '👍', { remove_keyboard: true });
-    return ctx.reply(text, { reply_markup: kb });
+    const kb = new InlineKeyboard()
+      .text(t(lang, 'btnConfirm'), 'confirm')
+      .row()
+      .text(t(lang, 'btnEdit'), 'edit')
+      .text(t(lang, 'btnCancel'), 'cancelcart');
+    // the step keyboard goes away and the bottom main menu comes back
+    await replyKeyboard(ctx, t(lang, 'almostDone'), mainMenu(lang));
+    return ctx.reply(text, { ...HTML, reply_markup: kb });
   }
+
+  // Summary -> menu: the cart stays, the checkout details are entered again.
+  pm.callbackQuery('edit', async (ctx) => {
+    if (!ctx.session.cart) return stale(ctx);
+    await ctx.answerCallbackQuery();
+    ctx.session.checkout = null;
+    ctx.session.step = 'browsing';
+    return showMenu(ctx);
+  });
+
+  // Bottom-keyboard Back / Cancel. Same text as other buttons in some languages, so they only act
+  // during a checkout step; anywhere else the customer is pointed to the menu.
+  pm.hears(allTexts('btnStepBack'), async (ctx) => {
+    const { step, cart } = ctx.session;
+    if (!STEP_NUMBER[step] || !cart) return useMenu(ctx);
+    if (step === 'phone') {
+      delete ctx.session.checkout.landmark;
+      return askLandmark(ctx);
+    }
+    if (step === 'landmark') {
+      ctx.session.checkout = null;
+      return askLocation(ctx);
+    }
+    // location -> menu as a new message; bring the bottom menu back first (the step keyboard replaced it)
+    ctx.session.checkout = null;
+    ctx.session.step = 'browsing';
+    if (!ctx.session.menuShown) await replyKeyboard(ctx, '👌', mainMenu(L(ctx)));
+    return showMenu(ctx, { asNewMessage: true });
+  });
+
+  pm.hears(allTexts('btnStepCancel'), async (ctx) => {
+    if (!STEP_NUMBER[ctx.session.step]) return useMenu(ctx);
+    resetFlow(ctx);
+    return showHome(ctx);
+  });
 
   pm.callbackQuery('cancelcart', async (ctx) => {
     resetFlow(ctx);
@@ -412,9 +465,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
         const landmark = cleanText(text, 200);
         if (landmark.length < 3) return ctx.reply(t(lang, 'landmarkTooShort'));
         ctx.session.checkout.landmark = landmark;
-        ctx.session.step = 'phone';
-        const kb = new Keyboard().requestContact(t(lang, 'btnSharePhone')).resized().oneTime();
-        return replyKeyboard(ctx, t(lang, 'askPhone'), kb);
+        return askPhone(ctx);
       }
       case 'phone':
         return setPhone(ctx, text);

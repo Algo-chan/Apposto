@@ -2,6 +2,7 @@
 import { InlineKeyboard, Keyboard } from 'grammy';
 import { t, LANGS, LANG_LABELS } from '../i18n.js';
 import { summarizeCart, formatMoney } from '../core/orders.js';
+import { esc } from './html.js';
 
 /** Bottom menu. Persistent: it stays visible even after the customer types a message. */
 export function mainMenu(lang) {
@@ -44,16 +45,35 @@ export function merchantsKeyboard(merchants, lang, ratings = new Map()) {
   return kb;
 }
 
-export function renderMenu({ merchant, menu, cart, lang, eta }) {
+/** Progress line on each checkout step, e.g. '▰▰▱▱  Step 2 of 4'. */
+export function progressLine(lang, step) {
+  return `${'▰'.repeat(step)}${'▱'.repeat(4 - step)}  ${t(lang, 'stepOf', { n: step })}`;
+}
+
+/** The menu's Next button: item count (sum of quantities) and food total, or "your request". */
+export function cartNextLabel(summary, lang) {
+  if (summary.lines.length === 0 && summary.custom) return t(lang, 'cartNextRequest');
+  const count = summary.lines.reduce((n, l) => n + l.qty, 0);
+  return t(lang, 'cartNext', { count, total: formatMoney(summary.total) });
+}
+
+/**
+ * Step 1 (HTML). rating: {avg, count} | null, eta: {min, max} | null; a missing one is left out.
+ * Every shop / item name and the written request are escaped.
+ */
+export function renderMenu({ merchant, menu, cart, lang, eta, rating = null }) {
   const menuById = new Map(menu.map((i) => [i.id, i]));
   const s = summarizeCart(cart, menuById, lang);
-  const lines = [`🏪 ${merchant.names[lang]}`];
-  if (eta) lines.push(t(lang, 'etaLine', eta));
-  lines.push(t(lang, 'menuHint'), '', t(lang, 'yourOrder'));
-  if (s.isEmpty) lines.push(t(lang, 'empty'));
-  for (const l of s.lines) lines.push(`${l.qty} × ${l.name} = ${formatMoney(l.subtotal)}`);
-  if (s.custom) lines.push(`✍️ "${s.custom}"`);
-  if (!s.isEmpty) lines.push('', `${t(lang, 'food')}: ${foodText(s, lang)}`);
+  const lines = [progressLine(lang, 1), `<b>🏪 ${esc(merchant.names[lang] || merchant.names.en)}</b>`];
+  const info = [];
+  if (rating) info.push(`⭐ ${rating.avg.toFixed(1)} (${rating.count})`);
+  if (eta) info.push(t(lang, 'etaLine', eta));
+  if (info.length) lines.push(info.join(' · '));
+  lines.push(t(lang, 'menuHint'), '', esc(t(lang, 'yourOrder')));
+  if (s.isEmpty) lines.push(esc(t(lang, 'empty')));
+  for (const l of s.lines) lines.push(esc(`${l.qty} × ${l.name} = ${formatMoney(l.subtotal)}`));
+  if (s.custom) lines.push(`✍️ "${esc(s.custom)}"`);
+  if (!s.isEmpty) lines.push('', esc(`${t(lang, 'food')}: ${foodText(s, lang)}`));
 
   const kb = new InlineKeyboard();
   for (const item of menu) {
@@ -63,8 +83,8 @@ export function renderMenu({ merchant, menu, cart, lang, eta }) {
     kb.row();
   }
   kb.text(t(lang, 'btnCustom'), 'custom').row();
-  kb.text(t(lang, 'btnClear'), 'clear').text(t(lang, 'btnCheckout'), 'checkout').row();
-  kb.text(t(lang, 'btnBack'), 'back');
+  kb.text(cartNextLabel(s, lang), 'checkout').row();
+  kb.text(t(lang, 'btnShops'), 'back').text(t(lang, 'btnClear'), 'clear');
   return { text: lines.join('\n'), keyboard: kb, summary: s };
 }
 
@@ -84,22 +104,23 @@ export function distanceText(km) {
   return Number.isFinite(km) ? ` (~${km} km)` : '';
 }
 
+/** Order summary (HTML): who gets paid what. Food goes to the shop; delivery + service is cash to the rider. */
 export function renderSummary({ merchant, summary, checkout, serviceFee, lang, eta }) {
+  const cash = (checkout.deliveryFee || 0) + (serviceFee || 0);
   return [
-    t(lang, 'summaryTitle'),
-    `${t(lang, 'shop')}: ${merchant.names[lang]}`,
+    `<b>${esc(t(lang, 'summaryTitle'))}</b>`,
+    `🏪 ${esc(t(lang, 'shop'))}: <b>${esc(merchant.names[lang] || merchant.names.en)}</b>`,
     '',
-    itemLines(summary, lang),
+    esc(itemLines(summary, lang)),
     '',
-    `${t(lang, 'food')}: ${foodText(summary, lang)}`,
-    `${t(lang, 'deliveryFee')}: ${formatMoney(checkout.deliveryFee)}${distanceText(checkout.distanceKm)}`,
-    `${t(lang, 'serviceFee')}: ${formatMoney(serviceFee)}`,
-    ...(eta ? ['', t(lang, 'etaLine', eta)] : []),
+    `🍲 ${esc(t(lang, 'food'))} <b>${esc(foodText(summary, lang))}</b> · ${esc(t(lang, 'payShopTag'))}`,
+    `🚲 ${esc(t(lang, 'deliveryFee'))} ${formatMoney(checkout.deliveryFee)}${distanceText(checkout.distanceKm)}` +
+      ` · 🧾 ${esc(t(lang, 'serviceFee'))} ${formatMoney(serviceFee)}`,
+    `💵 <b>${formatMoney(cash)}</b> · ${esc(t(lang, 'cashRiderTag'))}`,
     '',
-    `📍 ${t(lang, 'location')}: ${checkout.landmark}`,
-    `📞 ${t(lang, 'phone')}: ${checkout.phone}`,
-    '',
-    t(lang, 'howToPay'),
+    `📍 ${esc(checkout.landmark)}`,
+    `📞 <code>${esc(checkout.phone)}</code>`,
+    ...(eta ? [t(lang, 'etaLine', eta)] : []),
   ].join('\n');
 }
 
