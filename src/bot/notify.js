@@ -2,15 +2,37 @@
 // Every send is wrapped: one blocked user must never crash an order flow.
 import { t, normLang } from '../i18n.js';
 import { OrderError } from '../core/orders.js';
+import { InputFile } from 'grammy';
 import { th, HTML } from './html.js';
 
-export function createNotifier({ api, store, config }) {
+export function createNotifier({ api, store, config, images }) {
   async function send(chatId, text, other = {}) {
     if (!chatId) return null;
     try {
       return await api.sendMessage(chatId, text, other);
     } catch (err) {
       console.error(`send to ${chatId} failed: ${err.description || err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Send a rendered card. Reuses Telegram's file_id after the first upload. Returns null when
+   * there is no image (caller sends text instead) or the send fails.
+   */
+  async function sendPhotoCached(chatId, key, args, other = {}) {
+    if (!chatId || !images) return null;
+    try {
+      const known = images.fileId(key);
+      if (known) return await api.sendPhoto(chatId, known, other);
+      const buf = await images.png(key, args);
+      if (!buf) return null;
+      const res = await api.sendPhoto(chatId, new InputFile(buf, 'card.png'), other);
+      const id = res?.photo?.at(-1)?.file_id;
+      if (id) images.remember(key, id);
+      return res;
+    } catch (err) {
+      console.error(`photo to ${chatId} failed: ${err.description || err.message}`);
       return null;
     }
   }
@@ -43,7 +65,7 @@ export function createNotifier({ api, store, config }) {
     return send(order.riderId, t(rider?.lang, key, { id: order.id, ...params }), other);
   }
 
-  return { send, dispatch, toCustomer, toMerchant, toRider };
+  return { send, sendPhotoCached, dispatch, toCustomer, toMerchant, toRider };
 }
 
 /** Turn known errors into a friendly alert; unknown errors bubble up to bot.catch. */
