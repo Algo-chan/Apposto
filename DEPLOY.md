@@ -182,11 +182,49 @@ git commit -m "your change"
 git push
 ```
 
-Render redeploys automatically on push. Environment variables and the Google Sheet do not need
-to change.
+Render redeploys automatically on push. Environment variables do not need to change.
 
-> **Live order tracker version:** Before this version goes live, run `npm run setup-sheet` once
-> (adds the `tracker_msg_id` column).
+### Updates that add sheet columns: run `npm run setup-sheet`
+
+Some updates add columns to the sheet (for example the live order tracker added
+`tracker_msg_id` to **Orders**). Render never changes the sheet itself, so after such an update
+run this once on your computer, against the same `GOOGLE_SHEET_ID`:
+
+```bash
+npm run setup-sheet
+```
+
+It only adds missing columns (on the right) and missing tabs; your rows stay. It prints
+`~ Orders: added columns tracker_msg_id` for what it added and `✓ Orders ok` when nothing was
+missing, so running it again is harmless.
+
+If a column is missing, the bot still starts, but the Render log shows one line per tab just
+before `📗 Connected to Google Sheets`, for example:
+
+```
+⚠️ Orders is missing columns: tracker_msg_id — run: npm run setup-sheet
+```
+
+Until you run it, whatever belongs in that column is not saved (for `tracker_msg_id`: after a
+restart, old tracker cards are not deleted and a customer may see two). Run
+`npm run setup-sheet`, then restart the service (Render → **Manual Deploy → Restart service**)
+and check the line is gone.
+
+### Payment guide picture
+
+The **❓ Where do I find the reference?** button under the payment message sends a picture of a
+real payment SMS with the reference number marked, then the written steps. Put it here:
+
+```
+assets/images/payment-guide.png
+```
+
+- Use a screenshot of a Telebirr or CBE confirmation SMS. **Blur names, phone numbers, account
+  numbers and balances** — only the reference number (e.g. `CK12AB34CD`) needs to stay readable.
+- **Commit it to git** (`git add assets/images/payment-guide.png`, commit, push). Render's disk is
+  wiped on every deploy, so a file copied onto the server by hand disappears.
+- Without the file the button still works: the customer gets the written steps only.
+- To use another file name or folder, set `PAYMENT_GUIDE_PATH`.
 
 ---
 
@@ -195,6 +233,8 @@ to change.
 | Symptom | Fix |
 |---|---|
 | `Missing tab "Merchants" in the spreadsheet` | Run `npm run setup-sheet` locally against the same `GOOGLE_SHEET_ID` |
+| `⚠️ Orders is missing columns: …` in the log | The sheet is older than the code: run `npm run setup-sheet` locally, then restart the service (section 6) |
+| "Where do I find the reference?" sends text only, no picture | `assets/images/payment-guide.png` is missing from git: add it, commit, push (section 6) |
 | `DECODER routines::unsupported` / `ERR_OSSL_UNSUPPORTED` | The private key lost its newlines or was truncated. Use a **Render Secret File** (above), or set `GOOGLE_CREDENTIALS_BASE64` and remove `GOOGLE_PRIVATE_KEY` |
 | `Source: GOOGLE_PRIVATE_KEY` in the startup error | The app did not see `GOOGLE_CREDENTIALS_BASE64` (wrong name, blank, or not saved). Check the exact spelling `GOOGLE_CREDENTIALS_BASE64`, or switch to a Secret File |
 | `409 Conflict: terminated by other getUpdates request` | Another copy is polling with the same token; stop your local bot |
