@@ -83,7 +83,8 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     return editOrReply(ctx, text, keyboard);
   }
   async function stale(ctx) {
-    return ctx.answerCallbackQuery({ text: t(L(ctx), 'staleButton'), show_alert: true });
+    await ctx.answerCallbackQuery({ text: t(L(ctx), 'staleButton'), show_alert: true });
+    return showHome(ctx);
   }
   function customerName(from) {
     return cleanText([from.first_name, from.last_name].filter(Boolean).join(' '), 60) || 'Customer';
@@ -272,19 +273,31 @@ export function registerCustomer(bot, { store, service, config, notify, insights
   pm.callbackQuery('confirm', async (ctx) => {
     const lang = L(ctx);
     const { cart, checkout, step } = ctx.session;
-    if (step !== 'confirm' || !cart || !checkout?.phone) return stale(ctx);
+    if (step !== 'confirm' || !cart || !checkout?.phone) {
+      // a second tap on the summary that already became an order: ignore it quietly
+      const mid = ctx.callbackQuery.message?.message_id;
+      if (mid !== undefined && mid === ctx.session.placedFrom) return ctx.answerCallbackQuery();
+      return stale(ctx);
+    }
     const merchant = await store.getMerchant(cart.merchantId);
     if (!merchant?.active) return stale(ctx);
     const menu = await activeMenu(cart.merchantId);
     const menuById = new Map(menu.map((i) => [i.id, i]));
     const summary = summarizeCart(cart, menuById, lang);
     if (summary.isEmpty) return stale(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery({ text: '⏳' });
 
     const customer = { id: ctx.from.id, name: customerName(ctx.from), lang };
     const order = await service.placeOrder({ customer, merchant, summary, checkout });
-    await store.saveCustomer({ id: String(ctx.from.id), name: customer.name, phone: checkout.phone, lang });
+    ctx.session.placedFrom = ctx.callbackQuery.message?.message_id;
     resetFlow(ctx);
+    // The order exists now: a failure saving the customer's details must not stop the shop
+    // from being told about it.
+    try {
+      await store.saveCustomer({ id: String(ctx.from.id), name: customer.name, phone: checkout.phone, lang });
+    } catch (err) {
+      console.error(`save customer ${ctx.from.id} failed: ${err.message}`);
+    }
 
     await stampMessage(ctx, `📨 ${order.id}`);
     await ctx.reply(t(lang, 'orderPlaced', { id: order.id, merchant: merchant.names[lang] }), {
