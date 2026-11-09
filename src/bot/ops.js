@@ -61,6 +61,7 @@ export function registerOps(bot, { store, service, config, notify, insights, tra
       cLang,
       'payNow',
       {
+        id: order.id,
         merchant: merchant.names[cLang] || merchant.names.en,
         food: formatMoney(order.foodTotal),
         accounts: merchantAccountsHtml(merchant, cLang),

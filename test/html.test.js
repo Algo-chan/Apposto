@@ -77,3 +77,15 @@ test('toCustomer sends HTML and escapes params', async () => {
   assert.equal(other.parse_mode, 'HTML');
   assert.deepEqual(other.reply_markup, { x: 1 });
 });
+
+test('order ids in customer HTML messages are tap-to-copy (<code>), in every language', () => {
+  const keys = ['orderPlaced', 'orderCancelled', 'orderRejected', 'payNow', 'payNotFound', 'hlPaid', 'hlRider', 'hlComing', 'hlDone'];
+  for (const key of keys) {
+    for (const lang of ['en', 'om', 'am']) {
+      assert.ok(_strings[key][lang].includes('<code>{id}</code>'), `${key}.${lang}`);
+    }
+  }
+  for (const lang of ['en', 'om', 'am']) {
+    assert.match(_strings.payNow[lang].split('\n')[0], /<code>\{id\}<\/code>/, `payNow.${lang} first line`);
+  }
+});

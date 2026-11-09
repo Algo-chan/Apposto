@@ -305,7 +305,15 @@ test('rider who never pressed Start gets told, and the job stays open', async ()
   await h.tap(MERCHANT, `macc:${id}`);
   await h.text(CUSTOMER, 'CK99XY88ZZ');
   await h.tap(MERCHANT, `mpay:${id}`);
-  await h.tap(RIDER2, `take:${id}`, GROUP);
+  const origError = console.error;
+  const errors = [];
+  console.error = (...args) => errors.push(args.join(' '));
+  try {
+    await h.tap(RIDER2, `take:${id}`, GROUP);
+  } finally {
+    console.error = origError;
+  }
+  assert.ok(errors.some((e) => /send to 301 failed/.test(e)), 'the blocked send is logged');
   assert.match(h.lastAlert().text, /Start/);
   assert.equal((await h.order(id)).riderId, '');
   await h.tap(RIDER, `take:${id}`, GROUP);
@@ -1200,4 +1208,46 @@ test('tracker: a store that cannot keep the card id (old sheet) still leaves one
   const id2 = await h.placeOrder(CUSTOMER);
   await h.tap(MERCHANT, `mrej:${id2}`);
   assert.deepEqual(h.liveCards(CUSTOMER), [h.cardsTo(CUSTOMER).at(-2).result.message_id], 'only the delivered card of the first order');
+});
+
+test('a bottom menu that failed to send is sent again next time', async () => {
+  const h = setup();
+  await h.text(CUSTOMER, '/start');
+  const withMenu = (c) => c.method === 'sendMessage' && String(c.payload.chat_id) === String(CUSTOMER) && c.payload.reply_markup?.is_persistent === true;
+  h.failOnce((method, payload) => withMenu({ method, payload }));
+  await assert.rejects(h.tap(CUSTOMER, 'lang:en')); // the home line with the menu fails
+  const mark = h.calls.length;
+  await h.text(CUSTOMER, '/start');
+  assert.equal(h.calls.slice(mark).filter(withMenu).length, 1, 'the customer still has no bottom menu: send it');
+});
+
+test('the order id is tap-to-copy in the headlines, the payment message and the card', async () => {
+  const h = setup();
+  const id = await h.placeOrder(CUSTOMER);
+  const code = `<code>${id}</code>`;
+  const cardTitle = () => h.cardsTo(CUSTOMER).at(-1).payload.caption.split('\n')[0];
+  const headline = (re) => h.sentTo(CUSTOMER).map((c) => c.payload).filter((p) => re.test(p.text)).at(-1);
+  assert.ok(headline(/sent to/).text.includes(code), 'order placed');
+  assert.ok(cardTitle().endsWith(` · ${code}`), 'card title line');
+  await h.tap(MERCHANT, `macc:${id}`);
+  const pay = headline(/accepted your order/);
+  assert.equal(pay.parse_mode, 'HTML');
+  assert.ok(pay.text.split('\n')[0].includes(code), 'payment message first line');
+  await h.text(CUSTOMER, 'CK12AB34CD');
+  await h.tap(MERCHANT, `mpay:${id}`);
+  assert.ok(headline(/Payment confirmed/).text.includes(code), 'paid');
+  await h.tap(RIDER, `take:${id}`, GROUP);
+  assert.ok(headline(/will deliver/).text.includes(code), 'rider');
+  await h.tap(RIDER, `rpick:${id}`);
+  assert.ok(headline(/on the way/).text.includes(code), 'coming');
+  await h.tap(RIDER, `rdone:${id}`);
+  assert.ok(headline(/delivered/).text.includes(code), 'delivered');
+  assert.ok(cardTitle().endsWith(` · ${code}`), 'card title line, delivered');
+
+  const id2 = await h.placeOrder(CUSTOMER);
+  await h.tap(MERCHANT, `mrej:${id2}`);
+  assert.ok(headline(/can't take order/).text.includes(`<code>${id2}</code>`), 'rejected');
+  const id3 = await h.placeOrder(CUSTOMER);
+  await h.tap(CUSTOMER, `ccancel:${id3}`);
+  assert.ok(headline(/cancelled/).text.includes(`<code>${id3}</code>`), 'cancelled');
 });

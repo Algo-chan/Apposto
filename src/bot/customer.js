@@ -53,9 +53,11 @@ export function registerCustomer(bot, { store, service, config, notify, insights
    * Send a message that sets or removes the reply keyboard, and remember whether the customer now
    * has the bottom menu. mainMenu is the only persistent keyboard; any other one replaces it.
    */
-  function replyKeyboard(ctx, text, reply_markup, other = {}) {
+  async function replyKeyboard(ctx, text, reply_markup, other = {}) {
+    const sent = await ctx.reply(text, { ...other, reply_markup });
+    // only once Telegram took it: after a failed send the customer's keyboard is unchanged
     ctx.session.menuShown = reply_markup?.is_persistent === true;
-    return ctx.reply(text, { ...other, reply_markup });
+    return sent;
   }
   /**
    * Home screen. The bottom menu (reply keyboard, handy on phones) needs a text message, so a short

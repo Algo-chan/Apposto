@@ -150,22 +150,22 @@ const S = {
   btnConfirm: { en: '✅ Place order', om: '✅ Ajaja ergi', am: '✅ ትዕዛዝ ላክ' },
   btnCancel: { en: '❌ Cancel', om: '❌ Dhiisi', am: '❌ ሰርዝ' },
   orderPlaced: {
-    en: '📨 Order {id} sent to {merchant}. Waiting for them to accept ⏳',
-    om: '📨 Ajajni {id} gara {merchant} ergameera. Hanga fudhatanitti eegaa ⏳',
-    am: '📨 ትዕዛዝ {id} ወደ {merchant} ተልኳል። እስኪቀበሉ ይጠብቁ ⏳',
+    en: '📨 Order <code>{id}</code> sent to {merchant}. Waiting for them to accept ⏳',
+    om: '📨 Ajajni <code>{id}</code> gara {merchant} ergameera. Hanga fudhatanitti eegaa ⏳',
+    am: '📨 ትዕዛዝ <code>{id}</code> ወደ {merchant} ተልኳል። እስኪቀበሉ ይጠብቁ ⏳',
   },
-  orderCancelled: { en: 'Order {id} cancelled.', om: 'Ajajni {id} haqameera.', am: 'ትዕዛዝ {id} ተሰርዟል።' },
+  orderCancelled: { en: 'Order <code>{id}</code> cancelled.', om: 'Ajajni <code>{id}</code> haqameera.', am: 'ትዕዛዝ <code>{id}</code> ተሰርዟል።' },
   cartCancelled: { en: 'Cancelled.', om: 'Dhiifameera.', am: 'ተሰርዟል።' },
   orderRejected: {
-    en: 'Sorry 🙏 {merchant} can\'t take order {id} right now. Please try another shop.',
-    om: 'Dhiifama 🙏 {merchant} amma ajaja {id} fudhachuu hin danda\'u. Maaloo suuqii biraa yaalaa.',
-    am: 'ይቅርታ 🙏 {merchant} አሁን ትዕዛዝ {id}ን መቀበል አይችልም። እባክዎ ሌላ ሱቅ ይሞክሩ።',
+    en: 'Sorry 🙏 {merchant} can\'t take order <code>{id}</code> right now. Please try another shop.',
+    om: 'Dhiifama 🙏 {merchant} amma ajaja <code>{id}</code> fudhachuu hin danda\'u. Maaloo suuqii biraa yaalaa.',
+    am: 'ይቅርታ 🙏 {merchant} አሁን ትዕዛዝ <code>{id}</code>ን መቀበል አይችልም። እባክዎ ሌላ ሱቅ ይሞክሩ።',
   },
   // Oromo and Amharic payment-guide copy below is a careful draft: needs native review.
   payNow: {
-    en: '<b>✅ {merchant} accepted your order!</b>\n▰▰▱  Payment · 2 easy steps\n\n<b>1️⃣ Send {food} to the shop</b>\n{accounts}\n{tapToCopy}\n\n<b>2️⃣ Send the reference number here</b>\nIt\'s in the SMS you get after paying, e.g. <code>CK12AB34CD</code>\n\n🚲 Have <b>{fees} cash</b> ready for the rider.',
-    om: '<b>✅ {merchant} ajaja keessan fudhateera!</b>\n▰▰▱  Kaffaltii · tarkaanfii 2\n\n<b>1️⃣ {food} suuqiif kaffalaa</b>\n{accounts}\n{tapToCopy}\n\n<b>2️⃣ Lakkoofsa ragaa kaffaltii asitti ergaa</b>\nErga kaffaltanii booda SMS argattan keessa jira, fkn. <code>CK12AB34CD</code>\n\n🚲 Yeroo ajajni dhufu <b>{fees}</b> geessaaf maallaqa harkaan qopheessaa.',
-    am: '<b>✅ {merchant} ትዕዛዝዎን ተቀብሏል!</b>\n▰▰▱  ክፍያ · 2 ቀላል ደረጃዎች\n\n<b>1️⃣ {food} ለሱቁ ይክፈሉ</b>\n{accounts}\n{tapToCopy}\n\n<b>2️⃣ የማጣቀሻ ቁጥሩን እዚህ ይላኩ</b>\nከከፈሉ በኋላ በሚደርስዎ SMS ውስጥ አለ፣ ለምሳሌ <code>CK12AB34CD</code>\n\n🚲 ትዕዛዙ ሲደርስ <b>{fees}</b> ለአድራሹ በጥሬ ገንዘብ ያዘጋጁ።',
+    en: '<b>✅ {merchant} accepted your order!</b> · <code>{id}</code>\n▰▰▱  Payment · 2 easy steps\n\n<b>1️⃣ Send {food} to the shop</b>\n{accounts}\n{tapToCopy}\n\n<b>2️⃣ Send the reference number here</b>\nIt\'s in the SMS you get after paying, e.g. <code>CK12AB34CD</code>\n\n🚲 Have <b>{fees} cash</b> ready for the rider.',
+    om: '<b>✅ {merchant} ajaja keessan fudhateera!</b> · <code>{id}</code>\n▰▰▱  Kaffaltii · tarkaanfii 2\n\n<b>1️⃣ {food} suuqiif kaffalaa</b>\n{accounts}\n{tapToCopy}\n\n<b>2️⃣ Lakkoofsa ragaa kaffaltii asitti ergaa</b>\nErga kaffaltanii booda SMS argattan keessa jira, fkn. <code>CK12AB34CD</code>\n\n🚲 Yeroo ajajni dhufu <b>{fees}</b> geessaaf maallaqa harkaan qopheessaa.',
+    am: '<b>✅ {merchant} ትዕዛዝዎን ተቀብሏል!</b> · <code>{id}</code>\n▰▰▱  ክፍያ · 2 ቀላል ደረጃዎች\n\n<b>1️⃣ {food} ለሱቁ ይክፈሉ</b>\n{accounts}\n{tapToCopy}\n\n<b>2️⃣ የማጣቀሻ ቁጥሩን እዚህ ይላኩ</b>\nከከፈሉ በኋላ በሚደርስዎ SMS ውስጥ አለ፣ ለምሳሌ <code>CK12AB34CD</code>\n\n🚲 ትዕዛዙ ሲደርስ <b>{fees}</b> ለአድራሹ በጥሬ ገንዘብ ያዘጋጁ።',
   },
   payTapToCopy: {
     en: '👆 Tap a number to copy it',
@@ -214,9 +214,9 @@ const S = {
     am: '<b>ደርሶናል ✅</b> ሱቁ ክፍያዎን እያረጋገጠ ነው።',
   },
   payNotFound: {
-    en: '<b>⚠️ The shop could not find your payment for order {id}.</b>\nPlease check and send the correct reference number.',
-    om: '<b>⚠️ Suuqiin kaffaltii ajaja {id} hin arganne.</b>\nMaaloo ilaalaatii lakkoofsa ragaa sirrii ergaa.',
-    am: '<b>⚠️ ሱቁ ለትዕዛዝ {id} ክፍያዎን አላገኘም።</b>\nእባክዎ አረጋግጠው ትክክለኛውን የማጣቀሻ ቁጥር ይላኩ።',
+    en: '<b>⚠️ The shop could not find your payment for order <code>{id}</code>.</b>\nPlease check and send the correct reference number.',
+    om: '<b>⚠️ Suuqiin kaffaltii ajaja <code>{id}</code> hin arganne.</b>\nMaaloo ilaalaatii lakkoofsa ragaa sirrii ergaa.',
+    am: '<b>⚠️ ሱቁ ለትዕዛዝ <code>{id}</code> ክፍያዎን አላገኘም።</b>\nእባክዎ አረጋግጠው ትክክለኛውን የማጣቀሻ ቁጥር ይላኩ።',
   },
   noOrders: { en: 'You have no orders yet.', om: 'Ammatti ajaja hin qabdan.', am: 'እስካሁን ትዕዛዝ የለዎትም።' },
   myOrdersTitle: { en: '📦 Your recent orders:', om: '📦 Ajajawwan keessan dhihoo:', am: '📦 የቅርብ ጊዜ ትዕዛዞችዎ፦' },
@@ -280,24 +280,24 @@ const S = {
   },
   // Headlines: short messages that stay in the chat above the live card (HTML)
   hlPaid: {
-    en: '<b>💚 Payment confirmed!</b> Your order {id} is being prepared.\n🕒 Estimated arrival: in about {min}–{max} min',
-    om: '<b>💚 Kaffaltiin mirkanaa\'eera!</b> Ajajni {id} keessan qophaa\'aa jira.\n🕒 Gahiinsa tilmaamame: daqiiqaa {min}–{max} keessatti',
-    am: '<b>💚 ክፍያዎ ተረጋግጧል!</b> ትዕዛዝ {id} እየተዘጋጀ ነው።\n🕒 የሚደርስበት ግምት፦ በ{min}–{max} ደቂቃ ውስጥ',
+    en: '<b>💚 Payment confirmed!</b> Your order <code>{id}</code> is being prepared.\n🕒 Estimated arrival: in about {min}–{max} min',
+    om: '<b>💚 Kaffaltiin mirkanaa\'eera!</b> Ajajni <code>{id}</code> keessan qophaa\'aa jira.\n🕒 Gahiinsa tilmaamame: daqiiqaa {min}–{max} keessatti',
+    am: '<b>💚 ክፍያዎ ተረጋግጧል!</b> ትዕዛዝ <code>{id}</code> እየተዘጋጀ ነው።\n🕒 የሚደርስበት ግምት፦ በ{min}–{max} ደቂቃ ውስጥ',
   },
   hlRider: {
-    en: '🚲 <b>{rider}</b> will deliver order {id}. Phone: {phone}',
-    om: '🚲 <b>{rider}</b> ajaja {id} isinii geessa. Bilbila: {phone}',
-    am: '🚲 <b>{rider}</b> ትዕዛዝ {id}ን ያደርስልዎታል። ስልክ፦ {phone}',
+    en: '🚲 <b>{rider}</b> will deliver order <code>{id}</code>. Phone: {phone}',
+    om: '🚲 <b>{rider}</b> ajaja <code>{id}</code> isinii geessa. Bilbila: {phone}',
+    am: '🚲 <b>{rider}</b> ትዕዛዝ <code>{id}</code>ን ያደርስልዎታል። ስልክ፦ {phone}',
   },
   hlComing: {
-    en: '<b>🚲 Order {id} is on the way!</b> Have {fees} ready for the rider.\n⏱ Arriving in about {min}–{max} min.',
-    om: '<b>🚲 Ajajni {id} karaa irra jira!</b> {fees} geessaaf qopheessaa.\n⏱ Daqiiqaa {min}–{max} keessatti ni gaha.',
-    am: '<b>🚲 ትዕዛዝ {id} በመንገድ ላይ ነው!</b> {fees} ለአድራሹ ያዘጋጁ።\n⏱ በ{min}–{max} ደቂቃ ውስጥ ይደርሳል።',
+    en: '<b>🚲 Order <code>{id}</code> is on the way!</b> Have {fees} ready for the rider.\n⏱ Arriving in about {min}–{max} min.',
+    om: '<b>🚲 Ajajni <code>{id}</code> karaa irra jira!</b> {fees} geessaaf qopheessaa.\n⏱ Daqiiqaa {min}–{max} keessatti ni gaha.',
+    am: '<b>🚲 ትዕዛዝ <code>{id}</code> በመንገድ ላይ ነው!</b> {fees} ለአድራሹ ያዘጋጁ።\n⏱ በ{min}–{max} ደቂቃ ውስጥ ይደርሳል።',
   },
   hlDone: {
-    en: '<b>✅ Order {id} delivered.</b> Thank you! 💚',
-    om: '<b>✅ Ajajni {id} isiniif geessameera.</b> Galatoomaa! 💚',
-    am: '<b>✅ ትዕዛዝ {id} ደርሷል።</b> እናመሰግናለን! 💚',
+    en: '<b>✅ Order <code>{id}</code> delivered.</b> Thank you! 💚',
+    om: '<b>✅ Ajajni <code>{id}</code> isiniif geessameera.</b> Galatoomaa! 💚',
+    am: '<b>✅ ትዕዛዝ <code>{id}</code> ደርሷል።</b> እናመሰግናለን! 💚',
   },
 
   // ---------- reviews ----------

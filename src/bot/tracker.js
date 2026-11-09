@@ -64,7 +64,7 @@ export function createTracker({ api, store, notify, config, insights }) {
   }
 
   function caption(order, stage, lang, eta) {
-    const lines = [`<b>${esc(t(lang, `cardTitle${stage}`))}</b> · ${esc(order.id)}`];
+    const lines = [`<b>${esc(t(lang, `cardTitle${stage}`))}</b> · <code>${esc(order.id)}</code>`];
     if (stage >= 4 && order.riderName) lines.push(`<b>${esc(order.riderName)}</b> · 📞 ${esc(order.riderPhone)}`);
     lines.push('', esc(timeline(lang, stage)));
     const after = [];
