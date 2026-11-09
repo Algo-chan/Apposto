@@ -108,10 +108,13 @@ export function createOrderService({ store, config, now = () => new Date() }) {
     );
   }
 
-  async function submitPayment(orderId, customerId, ref) {
-    const dup = await store.findOrderByPaymentRef(ref);
-    if (dup && dup.id !== orderId) throw new OrderError('DUPLICATE_REF', 'Reference already used');
-    return transition(orderId, STATUS.PAYMENT_SUBMITTED, { paymentRef: ref }, customerGuard(customerId));
+  /** Locked per reference (then per order, as everywhere), so two chats can't both use one ref. */
+  function submitPayment(orderId, customerId, ref) {
+    return withLock(`payref:${ref}`, async () => {
+      const dup = await store.findOrderByPaymentRef(ref);
+      if (dup && dup.id !== orderId) throw new OrderError('DUPLICATE_REF', 'Reference already used');
+      return transition(orderId, STATUS.PAYMENT_SUBMITTED, { paymentRef: ref }, customerGuard(customerId));
+    });
   }
 
   function assignRider(orderId, rider) {
