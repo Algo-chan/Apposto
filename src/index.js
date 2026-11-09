@@ -1,9 +1,11 @@
 import http from 'node:http';
+import { run } from '@grammyjs/runner';
 import dotenv from 'dotenv';
 import { loadConfig } from './config.js';
 import { createBot } from './bot/createBot.js';
 import { createMemoryStore, DEMO_SEED } from './storage/memoryStore.js';
 import { createSheetsStore } from './storage/sheetsStore.js';
+import { createHealthHandler, superviseRunner, startKeepAlive } from './runtime.js';
 
 dotenv.config({ quiet: true });
 if (process.argv.includes('--demo')) process.env.STORAGE = 'memory';
@@ -38,6 +40,8 @@ if (config.storage === 'memory') {
 }
 
 const { bot } = createBot({ config, store });
+let runner = null;
+let stopping = false;
 
 // Hosting platforms (Render, Railway, Fly...) set PORT and expect the process to bind it.
 // The bot itself uses long polling, so this is only a health endpoint for the platform.
@@ -45,15 +49,7 @@ const { bot } = createBot({ config, store });
 const port = Number(process.env.PORT);
 let healthServer = null;
 if (Number.isInteger(port) && port > 0) {
-  healthServer = http.createServer((req, res) => {
-    if (req.url === '/' || req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, uptime: Math.round(process.uptime()) }));
-      return;
-    }
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not found');
-  });
+  healthServer = http.createServer(createHealthHandler({ isRunning: () => !!runner && runner.isRunning() }));
   healthServer.listen(port, '0.0.0.0', () => {
     console.log(`❤️  Health server listening on 0.0.0.0:${port}`);
   });
@@ -71,14 +67,30 @@ try {
   process.exit(1);
 }
 
-const stop = () => {
-  bot.stop();
+await bot.init();
+// Polling errors are retried every 3 s (the default doubles without a cap).
+runner = run(bot, { runner: { retryInterval: 3000 } });
+superviseRunner(runner, {
+  isStopping: () => stopping,
+  onCrash: (r) => {
+    console.error('❌ Bot stopped unexpectedly:', r);
+    process.exit(1);
+  },
+});
+startKeepAlive({ baseUrl: process.env.RENDER_EXTERNAL_URL });
+
+const shutdown = async () => {
+  if (stopping) return;
+  stopping = true;
+  try {
+    await runner.stop();
+    await store.close?.();
+  } catch (err) {
+    console.error('Error while stopping:', err);
+  }
   if (healthServer) healthServer.close();
 };
-process.once('SIGINT', stop);
-process.once('SIGTERM', stop);
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
 
-await bot.start({
-  drop_pending_updates: false,
-  onStart: (me) => console.log(`🚲 @${me.username} is running. Press Ctrl+C to stop.`),
-});
+console.log(`🚲 @${bot.botInfo.username} is running (parallel mode). Press Ctrl+C to stop.`);
