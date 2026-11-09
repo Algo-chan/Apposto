@@ -45,6 +45,6 @@ test('timeline: delivered is all done, in every language', () => {
 
 test('the tracker card renders as a PNG with labels in the customer language', async () => {
   const { renderCard } = await import('../src/bot/createBot.js');
-  const png = await renderCard({ kind: 'tracker', lang: 'om', stage: 4, eta: 'daqiiqaa 5–10' });
+  const png = await renderCard({ kind: 'tracker', lang: 'om', stage: 4, eta: 'daqiiqaa 30–40' });
   assert.deepEqual([...png.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
 });

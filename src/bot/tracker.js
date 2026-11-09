@@ -43,11 +43,14 @@ export function createTracker({ api, store, notify, config, insights }) {
     }
   }
 
-  /** Stages 1-3: full estimate (prep + ride); 4-5: the ride only; 6: none. */
+  /**
+   * Stages 1-4: full estimate (prep + ride; at 4 the rider has not reached the shop yet);
+   * 5 (picked up): the ride only; 6: none.
+   */
   async function etaText(order, stage, lang) {
     try {
       let eta = null;
-      if (stage <= 3) {
+      if (stage <= 4) {
         const merchant = await store.getMerchant(order.merchantId);
         if (merchant) eta = await insights.eta(merchant, order.distanceKm);
       } else if (stage < STAGES) {

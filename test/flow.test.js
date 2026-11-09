@@ -979,11 +979,14 @@ test('tracker: every update deletes the previous card, so only one is live', asy
   const riderCard = h.cardsTo(CUSTOMER).at(-1).payload;
   assert.match(riderCard.caption, /<b>Kebede<\/b> · 📞 0922222222/);
   assert.match(riderCard.caption, /^🟢 Rider assigned/m);
-  assert.match(riderCard.caption, /🕒 5–10 min/);
+  // the rider still has to reach the shop: the full estimate, as on the payment-confirmed card
+  assert.match(riderCard.caption, /🕒 30–40 min/);
   assert.deepEqual(h.buttons(riderCard), [`callrider:${id}`, 'menu:help']);
   await h.tap(MERCHANT, `mready:${id}`);
   await h.tap(RIDER, `rpick:${id}`);
-  assert.match(h.cardsTo(CUSTOMER).at(-1).payload.caption, /^🟢 On the way/m);
+  const coming = h.cardsTo(CUSTOMER).at(-1).payload.caption;
+  assert.match(coming, /^🟢 On the way/m);
+  assert.match(coming, /🕒 5–10 min/, 'picked up: the ride only');
   await h.tap(RIDER, `rdone:${id}`);
   const done = h.cardsTo(CUSTOMER).at(-1).payload;
   assert.doesNotMatch(done.caption, /[🟢⚪]/u);
