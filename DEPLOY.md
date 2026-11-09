@@ -150,13 +150,17 @@ other way around). Telegram allows one polling connection per token; a second on
 
 ## 5. Keep the free service awake
 
-Free web services sleep after 15 minutes without traffic. Create a free monitor that calls the
-health URL more often than that:
+Free web services sleep after 15 minutes without traffic. On Render the bot now pings its own
+/health URL every 10 minutes to stay awake. A free external monitor is still recommended as a
+backup:
 
 - **UptimeRobot** (free): HTTP(s) monitor → `https://<service-name>.onrender.com/health` → every 5 min.
 - **cron-job.org** (free): URL above → every 5 minutes.
 
-The endpoint returns only `{ ok, uptime }`; it exposes no order data.
+The endpoint returns only `{ ok, uptime, runner }`; it exposes no order data. If the bot loop
+stops unexpectedly, the process exits and Render starts it again — that is the restart path.
+While the loop is stopped, `/health` returns 503, so you (or your monitor) can see that state;
+the 503 itself does not make Render restart the service.
 
 If the service still sleeps or Render restarts it, the bot reconnects automatically. Updates sent
 while it is asleep stay queued in Telegram and are processed after wake-up.
@@ -187,6 +191,7 @@ to change.
 | Deploy fails health check | The app must bind `$PORT`; keep the health server code in `src/index.js` and use `npm start` |
 | Bot does nothing, logs fine | Check `BOT_TOKEN`, then send `/myid`; make sure the bot is not blocked |
 | Riders get no jobs | Set `DISPATCH_CHAT_ID` and add the bot to the group; each rider must press Start once privately |
+| Orders or customers look wrong after a sheet edit | Don't sort or delete rows in Orders/Customers/Reviews while the bot is running. Filter views are fine. Hand edits show up in the bot within about a minute |
 | Service sleeps anyway | Pinger interval must be under 15 minutes; check the monitor is actually running |
 
 Useful logs: Render Dashboard → your service → **Logs**. Every send failure is logged without
