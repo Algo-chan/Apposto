@@ -13,14 +13,14 @@ const texts = {
 };
 
 for (const [lang, args] of Object.entries(texts)) {
-  test(`banner renders a small PNG (${lang})`, () => {
-    const png = renderPng(bannerSvg(args));
+  test(`banner renders a small PNG (${lang})`, async () => {
+    const png = await renderPng(bannerSvg(args));
     assert.deepEqual([...png.subarray(0, 4)], SIG);
     assert.ok(png.length < 120000, `size ${png.length}`);
   });
 }
 
-test('trackerSvg escapes text and colours bars by stage', () => {
+test('trackerSvg escapes text and colours bars by stage', async () => {
   const labels = ['a', 'b', 'c', 'd', 'e', 'f'];
   const svg = trackerSvg({ title: 'A & B', eta: '20–30 min', stage: 4, labels });
   assert.ok(svg.includes('A &amp; B'));
@@ -28,7 +28,7 @@ test('trackerSvg escapes text and colours bars by stage', () => {
   assert.equal(count('#4BE3A4'), 3);
   assert.equal(count('#FFC72C'), 1);
   assert.equal(count('#25564A'), 2);
-  assert.deepEqual([...renderPng(svg).subarray(0, 4)], SIG);
+  assert.deepEqual([...(await renderPng(svg)).subarray(0, 4)], SIG);
 });
 
 test('cache memoizes by key', async () => {
@@ -96,4 +96,17 @@ test('sendPhotoCached returns null with no image or on send failure', async () =
   try {
     assert.equal(await createNotifier({ api, store: {}, config: {}, images: images2 }).sendPhotoCached(1, 'k', {}, {}), null);
   } finally { console.error = origErr; }
+});
+
+test('renderPng does not block the event loop', async () => {
+  let ticks = 0;
+  const timer = setInterval(() => ticks++, 1);
+  try {
+    const svg = bannerSvg(texts.en);
+    // several renders in flight: ticks must keep firing while the worker threads are busy
+    await Promise.all([renderPng(svg), renderPng(svg), renderPng(svg)]);
+  } finally {
+    clearInterval(timer);
+  }
+  assert.ok(ticks > 0, 'timer never fired during render');
 });

@@ -1,7 +1,7 @@
 // Deep Pine + Mint picture cards (SVG -> PNG via resvg, with bundled fonts).
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Resvg } from '@resvg/resvg-js';
+import { renderAsync } from '@resvg/resvg-js';
 
 const PINE = '#0A2E25';
 const CARD = '#0F362C';
@@ -64,11 +64,12 @@ export function trackerSvg({ title, eta, stage, labels }) {
 ${bars}${texts}</svg>`;
 }
 
-export function renderPng(svg) {
-  return new Resvg(svg, {
+// Async so the CPU work runs on resvg's worker thread, keeping the event loop (and the
+// cache's timeout timer) free while a picture renders.
+export async function renderPng(svg) {
+  const img = await renderAsync(svg, {
     font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: 'Noto Sans' },
     fitTo: { mode: 'width', value: 960 },
-  })
-    .render()
-    .asPng();
+  });
+  return img.asPng();
 }
