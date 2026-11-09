@@ -1,4 +1,6 @@
 import { Bot, session } from 'grammy';
+import { sequentialize } from '@grammyjs/runner';
+import { chatKey, autoAnswerCallbacks, slowUpdateLog, telegramRetry } from './reliability.js';
 import { createOrderService } from '../core/orderService.js';
 import { createNotifier } from './notify.js';
 import { registerOps } from './ops.js';
@@ -14,6 +16,12 @@ export function createBot({ config, store, botInfo, now }) {
   const insights = createInsights({ store, config });
   const deps = { store, service, config, notify, insights };
 
+  bot.api.config.use(telegramRetry());
+
+  // one update at a time per chat, many chats in parallel
+  bot.use(sequentialize(chatKey));
+  bot.use(slowUpdateLog());
+  bot.use(autoAnswerCallbacks());
   bot.use(
     session({
       initial: () => ({ lang: null, step: null, cart: null, checkout: null, merchantPriceFor: null }),
@@ -37,8 +45,15 @@ export function createBot({ config, store, botInfo, now }) {
     console.error(`Error on update ${err.ctx?.update?.update_id}:`, err.error);
     try {
       const lang = err.ctx?.session?.lang || 'en';
-      if (err.ctx?.callbackQuery) await err.ctx.answerCallbackQuery({ text: t(lang, 'error'), show_alert: true });
-      else if (err.ctx?.chat?.type === 'private') await err.ctx.reply(t(lang, 'error'));
+      if (err.ctx?.callbackQuery) {
+        try {
+          await err.ctx.answerCallbackQuery({ text: t(lang, 'error'), show_alert: true });
+          return;
+        } catch {
+          /* already answered (e.g. with ⏳) or expired: fall back to a message */
+        }
+      }
+      if (err.ctx?.chat?.type === 'private') await err.ctx.reply(t(lang, 'error'));
     } catch {
       /* ignore */
     }
