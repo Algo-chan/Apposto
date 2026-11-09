@@ -7,12 +7,34 @@ import { registerOps } from './ops.js';
 import { registerCustomer } from './customer.js';
 import { createInsights } from './insights.js';
 import { registerReviews } from './reviews.js';
-import { t } from '../i18n.js';
+import { t, LANGS } from '../i18n.js';
+import { createImageCache } from '../render/imageCache.js';
+import { bannerSvg, renderPng } from '../render/cards.js';
 
-export function createBot({ config, store, botInfo, now }) {
+/**
+ * Picture cards by kind. Cache keys pair with args: 'banner:<lang>' -> { kind: 'banner', lang }.
+ * The SVG is built inside the cache job, so a cached picture costs nothing to send again.
+ */
+export function renderCard({ kind, lang } = {}) {
+  if (kind === 'banner') {
+    return renderPng(
+      bannerSvg({ slogan: t(lang, 'bannerSlogan'), tagline: t(lang, 'bannerTagline'), cta: t(lang, 'bannerCta') })
+    );
+  }
+  throw new Error(`unknown card kind: ${kind}`);
+}
+
+/**
+ * images: an image cache (tests pass a fast fake); warmImages: render the welcome banners in
+ * the background now, so the first customer doesn't wait for them.
+ */
+export function createBot({ config, store, botInfo, now, images, warmImages = true }) {
   const bot = new Bot(config.botToken, botInfo ? { botInfo } : undefined);
   const service = createOrderService({ store, config, now });
-  const notify = createNotifier({ api: bot.api, store, config });
+  images ??= createImageCache({ render: renderCard });
+  // png() never rejects: a failed render is logged by the cache and retried on next use
+  if (warmImages) for (const lang of LANGS) images.png(`banner:${lang}`, { kind: 'banner', lang });
+  const notify = createNotifier({ api: bot.api, store, config, images });
   const insights = createInsights({ store, config });
   const deps = { store, service, config, notify, insights };
 
@@ -24,7 +46,8 @@ export function createBot({ config, store, botInfo, now }) {
   bot.use(autoAnswerCallbacks());
   bot.use(
     session({
-      initial: () => ({ lang: null, step: null, cart: null, checkout: null, merchantPriceFor: null }),
+      // menuShown: the bottom menu (mainMenu) is the reply keyboard the customer has right now
+      initial: () => ({ lang: null, step: null, cart: null, checkout: null, merchantPriceFor: null, menuShown: false }),
     })
   );
 

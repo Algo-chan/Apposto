@@ -3,6 +3,7 @@ import { InlineKeyboard, Keyboard } from 'grammy';
 import { t, LANGS, LANG_LABELS } from '../i18n.js';
 import { summarizeCart, formatMoney } from '../core/orders.js';
 
+/** Bottom menu. Persistent: it stays visible even after the customer types a message. */
 export function mainMenu(lang) {
   return new Keyboard()
     .text(t(lang, 'btnOrder'))
@@ -11,7 +12,8 @@ export function mainMenu(lang) {
     .text(t(lang, 'btnHelp'))
     .row()
     .text(t(lang, 'btnLang'))
-    .resized();
+    .resized()
+    .persistent();
 }
 
 export function langKeyboard() {
@@ -23,7 +25,7 @@ export function langKeyboard() {
 /** Inline version of the main menu: always visible inside the message, also on Telegram Desktop. */
 export function homeInline(lang) {
   return new InlineKeyboard()
-    .text(t(lang, 'btnOrder'), 'menu:order')
+    .text(t(lang, 'btnStartOrder'), 'menu:order')
     .row()
     .text(t(lang, 'btnMyOrders'), 'menu:orders')
     .text(t(lang, 'btnHelp'), 'menu:help')

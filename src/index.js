@@ -3,6 +3,7 @@ import { run } from '@grammyjs/runner';
 import dotenv from 'dotenv';
 import { loadConfig } from './config.js';
 import { createBot } from './bot/createBot.js';
+import { applyProfile } from './bot/profile.js';
 import { createMemoryStore, DEMO_SEED } from './storage/memoryStore.js';
 import { createSheetsStore } from './storage/sheetsStore.js';
 import { createHealthHandler, superviseRunner, startKeepAlive } from './runtime.js';
@@ -65,6 +66,12 @@ try {
   console.error(`❌ Could not reach Telegram: ${err.description || err.message}`);
   console.error('   Check BOT_TOKEN in .env and your internet connection.');
   process.exit(1);
+}
+// The profile text is nice to have: the bot runs without it.
+try {
+  await applyProfile(bot.api, { brand: config.brandName });
+} catch (err) {
+  console.error(`⚠️ Could not set the bot description: ${err.description || err.message}`);
 }
 
 await bot.init();

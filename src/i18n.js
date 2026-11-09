@@ -5,6 +5,15 @@
 export const LANGS = ['om', 'am', 'en'];
 export const LANG_LABELS = { om: 'Afaan Oromoo', am: 'አማርኛ', en: 'English' };
 
+// Bot profile texts: Telegram shows them before the customer picks a language, so all three
+// languages are in one string. Limits: description 512, short description 120 characters.
+const DESCRIPTION = [
+  '🚲 {brand}: order food from shops and restaurants in Shashamane, delivered to you by bicycle. Tap Start to order.',
+  '🚲 {brand}: suuqiiwwanii fi mana nyaataa Shashamannee irraa nyaata ajajadhaa, saayikiliin isinii geessina. Ajajuuf Start tuqaa.',
+  '🚲 {brand}፦ ከሻሸመኔ ሱቆችና ምግብ ቤቶች ምግብ ይዘዙ፣ በብስክሌት እናደርስልዎታለን። ለማዘዝ Start ይንኩ።',
+].join('\n\n');
+const SHORT_DESCRIPTION = '🚲 {brand} · Shashamane delivery by bicycle · Geejjiba saayikilii Shashamannee · በሻሸመኔ በብስክሌት ማድረስ';
+
 const S = {
   // ---------- customer ----------
   chooseLang: {
@@ -12,11 +21,25 @@ const S = {
     om: 'Afaan keessan filadhaa 👇',
     am: 'ቋንቋዎን ይምረጡ 👇',
   },
-  welcome: {
-    en: 'Welcome to {brand}! 🚲\nOrder from shops and restaurants in Shashamane, delivered by bicycle.',
-    om: 'Baga gara {brand} dhuftan! 🚲\nSuuqiiwwanii fi mana nyaataa Shashamannee irraa ajajadhaa, saayikiliin isinii geessina.',
-    am: 'እንኳን ወደ {brand} በደህና መጡ! 🚲\nከሻሸመኔ ሱቆችና ምግብ ቤቶች ይዘዙ፣ በብስክሌት እናደርስልዎታለን።',
+  // Bot profile (set at startup): the same trilingual text in every language
+  botDescription: { en: DESCRIPTION, om: DESCRIPTION, am: DESCRIPTION },
+  botShortDescription: { en: SHORT_DESCRIPTION, om: SHORT_DESCRIPTION, am: SHORT_DESCRIPTION },
+  // Welcome screen: picture banner (short texts drawn on the image) + caption (HTML)
+  welcomeCaption: {
+    en: '<b>Welcome to {brand}! 👋</b>\n\n1️⃣ Pick a shop and your food\n2️⃣ Send your location\n3️⃣ Pay the shop, and a rider brings it',
+    om: '<b>Baga gara {brand} dhuftan! 👋</b>\n\n1️⃣ Suuqii fi nyaata keessan filadhaa\n2️⃣ Bakka jirtan ergaa\n3️⃣ Suuqiif kaffalaa, geessaan isinii fida',
+    am: '<b>እንኳን ወደ {brand} በደህና መጡ! 👋</b>\n\n1️⃣ ሱቅና ምግብዎን ይምረጡ\n2️⃣ አካባቢዎን ይላኩ\n3️⃣ ለሱቁ ይክፈሉ፣ አድራሹ ያመጣልዎታል',
   },
+  bannerSlogan: { en: 'Order. Relax. It\'s coming.', om: 'Ajajadhaa. Boqodhaa. Ni dhufa.', am: 'ይዘዙ። ዘና ይበሉ። እየመጣ ነው።' },
+  bannerTagline: {
+    en: 'Shashamane · delivered by bicycle',
+    om: 'Shashamannee · saayikiliin isinii geessina',
+    am: 'ሻሸመኔ · በብስክሌት እናደርስልዎታለን',
+  },
+  bannerCta: { en: 'Start an order', om: 'Ajaja jalqabi', am: 'ትዕዛዝ ይጀምሩ' },
+  btnStartOrder: { en: '🛍 Start an order', om: '🛍 Ajaja jalqabi', am: '🛍 ትዕዛዝ ይጀምሩ' },
+  langSet: { en: '🌐 English ✅', om: '🌐 Afaan Oromoo ✅', am: '🌐 አማርኛ ✅' },
+  homeLine: { en: '🏠 Home', om: '🏠 Fuula jalqabaa', am: '🏠 መነሻ' },
   btnOrder: { en: '🛍 Order', om: '🛍 Ajajuu', am: '🛍 ይዘዙ' },
   btnMyOrders: { en: '📦 My orders', om: '📦 Ajajawwan koo', am: '📦 ትዕዛዞቼ' },
   btnHelp: { en: '☎️ Help', om: '☎️ Gargaarsa', am: '☎️ እርዳታ' },

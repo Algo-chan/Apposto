@@ -5,11 +5,13 @@ import { createBot } from '../src/bot/createBot.js';
 import { createMemoryStore } from '../src/storage/memoryStore.js';
 import { loadConfig } from '../src/config.js';
 import { t } from '../src/i18n.js';
+import { createImageCache } from '../src/render/imageCache.js';
 
 const BOT = { id: 999999, is_bot: true, first_name: 'Bot', username: 'test_bot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false };
 const CUSTOMER = 100, MERCHANT = 200, RIDER = 300, RIDER2 = 301, ADMIN = 500, STRANGER = 666, GROUP = -1001;
 
-function setup() {
+/** realImages: render real PNG cards (slower); default is a tiny fake picture. */
+function setup({ failPhoto = false, realImages = false } = {}) {
   const origWarn = console.warn;
   console.warn = () => {};
   const { config } = loadConfig({
@@ -31,7 +33,8 @@ function setup() {
       { telegramId: String(RIDER2), name: 'Lensa', phone: '0933333333', lang: 'om', active: true },
     ],
   });
-  const { bot } = createBot({ config, store, botInfo: BOT });
+  const images = realImages ? undefined : createImageCache({ render: () => Buffer.from('png') });
+  const { bot } = createBot({ config, store, botInfo: BOT, images, warmImages: false });
   const calls = [];
   const blocked = new Set(); // chat ids that never pressed Start
   let mid = 5000;
@@ -39,6 +42,11 @@ function setup() {
     calls.push({ method, payload });
     if (method === 'sendMessage' && blocked.has(String(payload.chat_id))) {
       return { ok: false, error_code: 403, description: "Forbidden: bot can't initiate conversation with a user" };
+    }
+    if (method === 'sendPhoto') {
+      if (failPhoto) return { ok: false, error_code: 400, description: 'Bad Request: IMAGE_PROCESS_FAILED' };
+      const photo = [{ file_id: `F${mid}`, file_unique_id: `U${mid}`, width: 960, height: 480 }];
+      return { ok: true, result: { message_id: mid++, date: 0, chat: { id: payload.chat_id, type: 'private' }, photo, caption: payload.caption } };
     }
     if (method.startsWith('send') || method === 'editMessageText') {
       return { ok: true, result: { message_id: mid++, date: 0, chat: { id: payload.chat_id, type: 'private' }, text: payload.text } };
@@ -65,6 +73,10 @@ function setup() {
   }
   const sentTo = (chatId) => calls.filter((c) => c.method === 'sendMessage' && String(c.payload.chat_id) === String(chatId));
   const lastTo = (chatId) => sentTo(chatId).at(-1)?.payload;
+  const photosTo = (chatId) => calls.filter((c) => c.method === 'sendPhoto' && String(c.payload.chat_id) === String(chatId));
+  /** sendMessage / sendPhoto calls to a chat, from call number `from` on. */
+  const outTo = (chatId, from = 0) =>
+    calls.slice(from).filter((c) => ['sendMessage', 'sendPhoto'].includes(c.method) && String(c.payload.chat_id) === String(chatId));
   const lastAlert = () => calls.filter((c) => c.method === 'answerCallbackQuery').at(-1)?.payload;
   const buttons = (payload) => (payload?.reply_markup?.inline_keyboard || []).flat().map((b) => b.callback_data);
   const lastEdit = () => calls.filter((c) => c.method === 'editMessageText').at(-1)?.payload;
@@ -91,7 +103,7 @@ function setup() {
     return all.at(-1).id;
   }
 
-  return { bot, store, calls, blocked, text, send, tap, sentTo, lastTo, lastAlert, buttons, lastEdit, order, latestOrder, placeOrder, config };
+  return { bot, store, calls, blocked, text, send, tap, sentTo, photosTo, outTo, lastTo, lastAlert, buttons, lastEdit, order, latestOrder, placeOrder, config };
 }
 
 test('happy path: order -> accept -> pay -> confirm -> rider -> delivered, with attack attempts', async () => {
@@ -416,7 +428,7 @@ test('desktop user: inline menu, Skip button, pasted location — full order wit
   await h.text(CUSTOMER, '/start');
   await h.tap(CUSTOMER, 'lang:en');
   // home always has inline buttons (visible on Telegram Desktop)
-  assert.deepEqual(h.buttons(h.lastTo(CUSTOMER)), ['menu:order', 'menu:orders', 'menu:help', 'menu:lang']);
+  assert.deepEqual(h.buttons(h.photosTo(CUSTOMER).at(-1).payload), ['menu:order', 'menu:orders', 'menu:help', 'menu:lang']);
   // random text -> "Use the buttons below" WITH inline buttons
   await h.text(CUSTOMER, 'hello');
   assert.match(h.lastTo(CUSTOMER).text, /buttons below/);
@@ -481,8 +493,7 @@ async function upToSummary(h, cust = CUSTOMER) {
 test('double tap on Place order creates one order', async () => {
   const h = setup();
   await upToSummary(h);
-  const welcome = t('en', 'welcome', { brand: h.config.brandName });
-  const welcomes = () => h.sentTo(CUSTOMER).filter((c) => c.payload.text === welcome).length;
+  const welcomes = () => h.photosTo(CUSTOMER).length;
   const before = welcomes();
   await Promise.all([h.tap(CUSTOMER, 'confirm'), h.tap(CUSTOMER, 'confirm')]);
   assert.equal((await h.store.listOrders({ customerId: CUSTOMER })).length, 1);
@@ -576,5 +587,110 @@ test('old button after restart shows home', async () => {
   await h.tap(CUSTOMER, 'checkout');
   assert.equal(h.lastAlert().text, t('en', 'staleButton'));
   assert.equal(h.lastAlert().show_alert, true);
-  assert.equal(h.sentTo(CUSTOMER).some((c) => c.payload.text === t('en', 'welcome', { brand: h.config.brandName })), true);
+  assert.match(h.photosTo(CUSTOMER).at(-1).payload.caption, /Welcome to/);
+});
+
+// ---------- welcome screen (banner + persistent bottom menu) ----------
+
+const HOME = ['menu:order', 'menu:orders', 'menu:help', 'menu:lang'];
+
+test('welcome: one menu line with a persistent keyboard, then the banner with inline buttons', async () => {
+  const h = setup();
+  await h.text(CUSTOMER, '/start');
+  const mark = h.calls.length;
+  await h.tap(CUSTOMER, 'lang:en');
+  const out = h.outTo(CUSTOMER, mark);
+  assert.deepEqual(out.map((c) => c.method), ['sendMessage', 'sendPhoto']);
+  assert.equal(out[0].payload.text, '🌐 English ✅');
+  assert.equal(out[0].payload.reply_markup.is_persistent, true);
+  assert.equal(out[0].payload.reply_markup.keyboard[0][0].text, '🛍 Order');
+  const photo = out[1].payload;
+  assert.match(photo.caption, /Welcome to/);
+  assert.equal(photo.parse_mode, 'HTML');
+  assert.equal(photo.reply_markup.inline_keyboard[0][0].callback_data, 'menu:order');
+  assert.equal(photo.reply_markup.inline_keyboard[0].length, 1, 'Start an order is full width');
+  assert.equal(photo.reply_markup.inline_keyboard[0][0].text, '🛍 Start an order');
+  assert.deepEqual(h.buttons(photo), HOME);
+  assert.equal(h.sentTo(CUSTOMER).some((c) => c.payload.text === t('en', 'useMenu')), false);
+});
+
+test('welcome: a second /start sends only the banner; the menu line returns after another keyboard', async () => {
+  const h = setup();
+  await h.text(CUSTOMER, '/start');
+  await h.tap(CUSTOMER, 'lang:en');
+  let mark = h.calls.length;
+  await h.text(CUSTOMER, '/start');
+  assert.deepEqual(h.outTo(CUSTOMER, mark).map((c) => c.method), ['sendPhoto']);
+
+  // the location step replaces the bottom menu with a "Send my location" keyboard
+  await h.text(CUSTOMER, '🛍 Order');
+  await h.tap(CUSTOMER, 'm:M1');
+  await h.tap(CUSTOMER, 'add:I1');
+  await h.tap(CUSTOMER, 'checkout');
+  mark = h.calls.length;
+  await h.text(CUSTOMER, '/start');
+  const out = h.outTo(CUSTOMER, mark);
+  assert.deepEqual(out.map((c) => c.method), ['sendMessage', 'sendPhoto']);
+  assert.equal(out[0].payload.text, '🏠 Home');
+  assert.equal(out[0].payload.reply_markup.is_persistent, true);
+});
+
+test('welcome: the bottom menu is back after an order is placed and after "too far"', async () => {
+  const h = setup();
+  await h.placeOrder(CUSTOMER);
+  let mark = h.calls.length;
+  await h.text(CUSTOMER, '/start');
+  assert.deepEqual(h.outTo(CUSTOMER, mark).map((c) => c.method), ['sendPhoto']);
+
+  await h.text(CUSTOMER, '🛍 Order');
+  await h.tap(CUSTOMER, 'm:M1');
+  await h.tap(CUSTOMER, 'add:I1');
+  await h.tap(CUSTOMER, 'checkout');
+  await h.send(CUSTOMER, CUSTOMER, { location: { latitude: 7.5, longitude: 38.6 } }); // ~33 km away
+  assert.match(h.lastTo(CUSTOMER).text, /we deliver up to/);
+  assert.equal(h.lastTo(CUSTOMER).reply_markup.is_persistent, true);
+  mark = h.calls.length;
+  await h.text(CUSTOMER, '/start');
+  assert.deepEqual(h.outTo(CUSTOMER, mark).map((c) => c.method), ['sendPhoto']);
+});
+
+test('welcome: changing the language sends the menu again in the new language', async () => {
+  const h = setup();
+  await h.text(CUSTOMER, '/start');
+  await h.tap(CUSTOMER, 'lang:en');
+  await h.tap(CUSTOMER, 'menu:lang');
+  const mark = h.calls.length;
+  await h.tap(CUSTOMER, 'lang:om');
+  const out = h.outTo(CUSTOMER, mark);
+  assert.deepEqual(out.map((c) => c.method), ['sendMessage', 'sendPhoto']);
+  assert.equal(out[0].payload.text, '🌐 Afaan Oromoo ✅');
+  assert.equal(out[0].payload.reply_markup.keyboard[0][0].text, t('om', 'btnOrder'));
+  assert.match(out[1].payload.caption, /Baga gara/);
+});
+
+test('welcome: when the picture fails, the caption arrives as text with the same buttons', async () => {
+  const h = setup({ failPhoto: true });
+  const origError = console.error;
+  console.error = () => {};
+  try {
+    await h.text(CUSTOMER, '/start');
+    await h.tap(CUSTOMER, 'lang:en');
+  } finally {
+    console.error = origError;
+  }
+  const last = h.lastTo(CUSTOMER);
+  assert.match(last.text, /Welcome to/);
+  assert.match(last.text, /<b>/);
+  assert.equal(last.parse_mode, 'HTML');
+  assert.deepEqual(h.buttons(last), HOME);
+});
+
+test('welcome: the real banner is uploaded once, then sent again by file_id', async () => {
+  const h = setup({ realImages: true });
+  await h.text(CUSTOMER, '/start');
+  await h.tap(CUSTOMER, 'lang:en');
+  await h.text(CUSTOMER, '/start');
+  const [first, second] = h.photosTo(CUSTOMER).map((c) => c.payload.photo);
+  assert.equal(typeof first, 'object', 'first send uploads the PNG');
+  assert.equal(typeof second, 'string', 'second send reuses the file_id');
 });

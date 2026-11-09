@@ -103,7 +103,10 @@ export function registerReviews(bot, { store, service, notify, insights }) {
     let review = await store.getReview(orderId);
     if (!review || review.customerId !== String(ctx.from.id)) return;
     if (comment && !review.comment) review = await store.updateReview(orderId, { comment });
-    if (thank) await ctx.reply(t(lang, 'reviewThanks'), { reply_markup: mainMenu(lang) });
+    if (thank) {
+      await ctx.reply(t(lang, 'reviewThanks'), { reply_markup: mainMenu(lang) });
+      ctx.session.menuShown = true;
+    }
     const merchant = await store.getMerchant(review.merchantId);
     if (merchant) {
       await notify.toMerchant(merchant, 'mNewReview', {

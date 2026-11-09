@@ -146,6 +146,13 @@ defaults; add them only if you want to change the defaults (README section 5).
 other way around). Telegram allows one polling connection per token; a second one causes
 `409 Conflict: terminated by other getUpdates request`.
 
+### Bot profile
+
+The bot sets its own description and short description (Afaan Oromoo, Amharic and English) every
+time it starts. The profile photo is set once by hand:
+
+Set the profile photo: @BotFather → /setuserpic → `image/apposto-profile-logo-640.png`
+
 ---
 
 ## 5. Keep the free service awake

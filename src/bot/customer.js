@@ -28,6 +28,7 @@ import {
   distanceText,
 } from './ui.js';
 import { replyError, appendLine } from './notify.js';
+import { th, HTML } from './html.js';
 
 const L = (ctx) => ctx.session.lang || 'en';
 
@@ -46,11 +47,28 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     ctx.session.cart = null;
     ctx.session.checkout = null;
   }
-  async function showHome(ctx) {
+  /**
+   * Send a message that sets or removes the reply keyboard, and remember whether the customer now
+   * has the bottom menu. mainMenu is the only persistent keyboard; any other one replaces it.
+   */
+  function replyKeyboard(ctx, text, reply_markup) {
+    ctx.session.menuShown = reply_markup?.is_persistent === true;
+    return ctx.reply(text, { reply_markup });
+  }
+  /**
+   * Home screen. The bottom menu (reply keyboard, handy on phones) needs a text message, so a short
+   * line carries it, only when the customer doesn't have it already. Then the banner picture with
+   * inline buttons (always visible, also on Telegram Desktop); plain text if the picture fails.
+   */
+  async function showHome(ctx, { justChoseLanguage = false } = {}) {
     const lang = L(ctx);
-    // reply keyboard = handy buttons at the bottom on phones; inline buttons = always visible (also on desktop)
-    await ctx.reply(t(lang, 'welcome', { brand: config.brandName }), { reply_markup: mainMenu(lang) });
-    await ctx.reply(t(lang, 'useMenu'), { reply_markup: homeInline(lang) });
+    if (!ctx.session.menuShown) {
+      await replyKeyboard(ctx, t(lang, justChoseLanguage ? 'langSet' : 'homeLine'), mainMenu(lang));
+    }
+    const caption = th(lang, 'welcomeCaption', { brand: config.brandName });
+    const other = { caption, ...HTML, reply_markup: homeInline(lang) };
+    const photo = await notify.sendPhotoCached(ctx.chat.id, `banner:${lang}`, { kind: 'banner', lang }, other);
+    if (!photo) await ctx.reply(caption, { ...HTML, reply_markup: homeInline(lang) });
   }
   function useMenu(ctx) {
     return ctx.reply(t(L(ctx), 'useMenu'), { reply_markup: homeInline(L(ctx)) });
@@ -111,7 +129,8 @@ export function registerCustomer(bot, { store, service, config, notify, insights
       ...(await store.getCustomer(ctx.from.id) ? {} : { createdAt: localTimestamp() }),
     });
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
-    return showHome(ctx);
+    ctx.session.menuShown = false; // the bottom menu's labels are in the old language: send it again
+    return showHome(ctx, { justChoseLanguage: true });
   });
 
   const showLang = (ctx) => ctx.reply(t(L(ctx), 'chooseLang'), { reply_markup: langKeyboard() });
@@ -203,7 +222,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
       .text(t(lang, 'btnSkip'))
       .resized()
       .oneTime();
-    await ctx.reply(t(lang, 'askLocation'), { reply_markup: kb });
+    await replyKeyboard(ctx, t(lang, 'askLocation'), kb);
     // Telegram Desktop can't share GPS and often hides reply buttons: give an inline Skip + paste option
     return ctx.reply(t(lang, 'locDesktopHint'), {
       reply_markup: new InlineKeyboard().text(t(lang, 'btnSkip'), 'skiploc'),
@@ -232,13 +251,11 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     const { fee, outOfRange } = calcDeliveryFee(distanceKm, config);
     if (outOfRange) {
       resetFlow(ctx);
-      return ctx.reply(t(lang, 'outOfRange', { km: distanceKm, max: config.maxKm }), {
-        reply_markup: mainMenu(lang),
-      });
+      return replyKeyboard(ctx, t(lang, 'outOfRange', { km: distanceKm, max: config.maxKm }), mainMenu(lang));
     }
     ctx.session.checkout = { lat, lng, distanceKm, deliveryFee: fee };
     ctx.session.step = 'landmark';
-    return ctx.reply(t(lang, 'askLandmark'), { reply_markup: { remove_keyboard: true } });
+    return replyKeyboard(ctx, t(lang, 'askLandmark'), { remove_keyboard: true });
   }
 
   pm.on('message:contact', async (ctx) => {
@@ -259,7 +276,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     const eta = await insights.eta(merchant, ctx.session.checkout.distanceKm);
     const text = renderSummary({ merchant, summary, checkout: ctx.session.checkout, serviceFee: config.serviceFee, lang, eta });
     const kb = new InlineKeyboard().text(t(lang, 'btnConfirm'), 'confirm').row().text(t(lang, 'btnCancel'), 'cancelcart');
-    await ctx.reply('👍', { reply_markup: { remove_keyboard: true } });
+    await replyKeyboard(ctx, '👍', { remove_keyboard: true });
     return ctx.reply(text, { reply_markup: kb });
   }
 
@@ -300,9 +317,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     }
 
     await appendLine(ctx, `📨 ${order.id}`);
-    await ctx.reply(t(lang, 'orderPlaced', { id: order.id, merchant: merchant.names[lang] }), {
-      reply_markup: mainMenu(lang),
-    });
+    await replyKeyboard(ctx, t(lang, 'orderPlaced', { id: order.id, merchant: merchant.names[lang] }), mainMenu(lang));
 
     // Notify the shop (in the shop's language) with Accept / Reject
     const mLang = merchant.lang || 'en';
@@ -399,7 +414,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
         ctx.session.checkout.landmark = landmark;
         ctx.session.step = 'phone';
         const kb = new Keyboard().requestContact(t(lang, 'btnSharePhone')).resized().oneTime();
-        return ctx.reply(t(lang, 'askPhone'), { reply_markup: kb });
+        return replyKeyboard(ctx, t(lang, 'askPhone'), kb);
       }
       case 'phone':
         return setPhone(ctx, text);
