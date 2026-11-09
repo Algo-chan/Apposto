@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createBot } from '../src/bot/createBot.js';
 import { createMemoryStore } from '../src/storage/memoryStore.js';
 import { loadConfig } from '../src/config.js';
+import { t } from '../src/i18n.js';
 
 const BOT = { id: 999999, is_bot: true, first_name: 'Bot', username: 'test_bot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false };
 const CUSTOMER = 100, MERCHANT = 200, RIDER = 300, RIDER2 = 301, ADMIN = 500, STRANGER = 666, GROUP = -1001;
@@ -462,4 +463,118 @@ test('desktop user can paste coordinates or a Google Maps link as location', asy
   await h.tap(CUSTOMER, 'confirm');
   const o = (await h.store.listOrders({ customerId: CUSTOMER })).at(-1);
   assert.ok(o.distanceKm > 0.5 && o.distanceKm < 0.9, `distance ${o.distanceKm}`);
+});
+
+/** Walk one customer up to the order summary (Place order button shown). */
+async function upToSummary(h, cust = CUSTOMER) {
+  await h.text(cust, '/start');
+  await h.tap(cust, 'lang:en');
+  await h.text(cust, '🛍 Order');
+  await h.tap(cust, 'm:M1');
+  await h.tap(cust, 'add:I1');
+  await h.tap(cust, 'checkout');
+  await h.send(cust, cust, { location: { latitude: 7.205, longitude: 38.6 } });
+  await h.text(cust, 'Near Abyssinia bank, blue gate');
+  await h.send(cust, cust, { contact: { phone_number: '+251911234567', first_name: 'C' } });
+}
+
+test('double tap on Place order creates one order', async () => {
+  const h = setup();
+  await upToSummary(h);
+  const welcome = t('en', 'welcome', { brand: h.config.brandName });
+  const welcomes = () => h.sentTo(CUSTOMER).filter((c) => c.payload.text === welcome).length;
+  const before = welcomes();
+  await Promise.all([h.tap(CUSTOMER, 'confirm'), h.tap(CUSTOMER, 'confirm')]);
+  assert.equal((await h.store.listOrders({ customerId: CUSTOMER })).length, 1);
+  // the second tap is ignored: no "this menu is old" alert, no second home screen
+  const alerts = h.calls.filter((c) => c.method === 'answerCallbackQuery').map((c) => c.payload.text);
+  assert.equal(alerts.includes(t('en', 'staleButton')), false);
+  assert.equal(welcomes(), before);
+});
+
+test('checkout still completes when saving the customer fails', async () => {
+  const h = setup();
+  await upToSummary(h);
+  h.store.saveCustomer = async () => {
+    throw new Error('row 100 not found in Customers');
+  };
+  const origError = console.error;
+  const errors = [];
+  console.error = (...args) => errors.push(args.join(' '));
+  try {
+    await h.tap(CUSTOMER, 'confirm');
+    await h.tap(CUSTOMER, 'confirm'); // tapped again: still one order
+  } finally {
+    console.error = origError;
+  }
+  const orders = await h.store.listOrders({ customerId: CUSTOMER });
+  assert.equal(orders.length, 1);
+  assert.deepEqual(h.buttons(h.lastTo(MERCHANT)), [`macc:${orders[0].id}`, `mrej:${orders[0].id}`]);
+  assert.match(h.sentTo(GROUP).at(-1).payload.text, new RegExp(`🆕 ${orders[0].id}`));
+  assert.ok(errors.some((e) => /not found in Customers/.test(e)), 'the failure is logged');
+  // the flow was reset: the old checkout button no longer works
+  await h.tap(CUSTOMER, 'checkout');
+  assert.equal(h.lastAlert().text, t('en', 'staleButton'));
+});
+
+test('an error after the button was answered is shown as a message', async () => {
+  const h = setup();
+  await upToSummary(h);
+  h.store.createOrder = async () => {
+    throw new Error('Sheets down');
+  };
+  // Telegram refuses a second answer to the same button
+  const answered = new Set();
+  h.bot.api.config.use(async (prev, method, payload, signal) => {
+    if (method === 'answerCallbackQuery') {
+      if (answered.has(payload.callback_query_id)) {
+        return { ok: false, error_code: 400, description: 'Bad Request: query is too old and response timeout expired or query ID is invalid' };
+      }
+      answered.add(payload.callback_query_id);
+    }
+    return prev(method, payload, signal);
+  });
+  const origError = console.error;
+  console.error = () => {};
+  try {
+    // the runner hands a failed update to bot.catch; handleUpdate alone rethrows it
+    await h.tap(CUSTOMER, 'confirm').catch((err) => h.bot.errorHandler(err));
+  } finally {
+    console.error = origError;
+  }
+  assert.equal((await h.store.listOrders({ customerId: CUSTOMER })).length, 0);
+  assert.equal(h.lastTo(CUSTOMER).text, t('en', 'error'));
+});
+test('two customers are handled in parallel', async () => {
+  const h = setup();
+  // slow down every store call by 300 ms so one customer's path takes measurable time
+  for (const [name, fn] of Object.entries(h.store)) {
+    if (typeof fn !== 'function' || name === 'close') continue;
+    h.store[name] = async (...args) => {
+      await new Promise((r) => setTimeout(r, 300));
+      return fn.apply(h.store, args);
+    };
+  }
+  const flow = async (id) => {
+    await h.text(id, '/start');
+    await h.tap(id, 'lang:en');
+    await h.text(id, '🛍 Order');
+  };
+  const t0 = Date.now();
+  await flow(CUSTOMER);
+  const single = Date.now() - t0;
+  assert.ok(single >= 300, `single path should be slow, was ${single}ms`);
+  const t1 = Date.now();
+  await Promise.all([flow(101), flow(102)]);
+  const both = Date.now() - t1;
+  assert.ok(both < 1.5 * single, `parallel ${both}ms should be < 1.5 x ${single}ms`);
+});
+
+test('old button after restart shows home', async () => {
+  const h = setup();
+  await h.store.saveCustomer({ id: String(CUSTOMER), name: 'C', phone: '+251911234567', lang: 'en' });
+  await h.tap(CUSTOMER, 'checkout');
+  assert.equal(h.lastAlert().text, t('en', 'staleButton'));
+  assert.equal(h.lastAlert().show_alert, true);
+  assert.equal(h.sentTo(CUSTOMER).some((c) => c.payload.text === t('en', 'welcome', { brand: h.config.brandName })), true);
 });
