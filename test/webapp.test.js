@@ -87,3 +87,14 @@ test('strings: every English key exists in Oromo and Amharic, and every error co
   assert.match(tr('en', 'viewBasket', { n: 2, total: '500 Br' }), /2.*500 Br/);
   assert.equal(tr('xx', 'confirmOrder'), STRINGS.en.confirmOrder, 'unknown language falls back to English');
 });
+
+test('createApi keeps retrying a sleeping server for about a minute', async () => {
+  const { createApi } = await import('../webapp/net.js');
+  const { fn, calls } = fakeFetch([{ status: 503 }]);
+  let waited = 0;
+  const api = createApi({ initData: 'x', fetchFn: fn, sleep: async (ms) => (waited += ms) });
+  const r = await api('/api/me');
+  assert.equal(r.status, 503);
+  assert.ok(waited >= 55000 && waited <= 65000, `waited ${waited} ms over ${calls.length} tries`);
+  assert.equal(calls[0].opts.headers.Authorization, 'tma x');
+});

@@ -81,3 +81,15 @@ test('appUrl: APP_URL wins, else RENDER_EXTERNAL_URL + /app, else empty', () => 
   assert.equal(quiet({ ...base, RENDER_EXTERNAL_URL: 'https://x.onrender.com/' }), 'https://x.onrender.com/app');
   assert.equal(quiet(base), '');
 });
+
+test('appUrl must be https (Telegram refuses other app buttons): anything else is ignored with a warning', () => {
+  const warnings = [];
+  const w = console.warn;
+  console.warn = (m) => warnings.push(String(m));
+  try {
+    assert.equal(loadConfig({ BOT_TOKEN: '1:t', STORAGE: 'memory', APP_URL: 'http://x.test/app' }).config.appUrl, '');
+    assert.ok(warnings.some((m) => m.includes('APP_URL')));
+  } finally {
+    console.warn = w;
+  }
+});

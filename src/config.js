@@ -178,5 +178,11 @@ export function loadConfig(env = process.env) {
   if (config.adminIds.length === 0) {
     console.warn('⚠️  ADMIN_IDS not set: admin commands (/today, /active, /cancel) are disabled.');
   }
+  // Telegram refuses web-app buttons without https, and a refused button would break the message
+  // that carries it (the welcome screen): no app buttons at all is the safe choice.
+  if (config.appUrl && !/^https:\/\//i.test(config.appUrl)) {
+    console.warn(`⚠️  APP_URL must start with https:// (got ${config.appUrl}): the mini app buttons are off.`);
+    config.appUrl = '';
+  }
   return { config, problems };
 }

@@ -32,8 +32,11 @@ export async function requestWithRetry(fetchFn, url, opts = {}, { tries = 6, del
   return last;
 }
 
+// A sleeping free server takes up to about a minute to wake: 20 waits of 3 s.
+const APP_TRIES = 21;
+
 /** api(path, { method, body }) for the page: adds the Telegram sign-in and JSON. */
-export function createApi({ initData, fetchFn = (...a) => fetch(...a), onRetry } = {}) {
+export function createApi({ initData, fetchFn = (...a) => fetch(...a), onRetry, sleep = wait } = {}) {
   return (path, { method = 'GET', body } = {}) =>
     requestWithRetry(
       fetchFn,
@@ -43,6 +46,6 @@ export function createApi({ initData, fetchFn = (...a) => fetch(...a), onRetry }
         headers: { Authorization: `tma ${initData}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}),
       },
-      { onRetry }
+      { tries: APP_TRIES, onRetry, sleep }
     );
 }

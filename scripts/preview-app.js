@@ -21,7 +21,7 @@ const TOKEN = '0:preview-not-a-real-token';
 const BOT = { id: 1, is_bot: true, first_name: 'Preview', username: 'preview_bot', can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false };
 
 // Never read .env here: the live token must not be used by the preview.
-const { config } = loadConfig({ BOT_TOKEN: TOKEN, STORAGE: 'memory', APP_URL: `http://localhost:${PORT}/app`, SUPPORT_PHONE: '0911000000' });
+const { config } = loadConfig({ BOT_TOKEN: TOKEN, STORAGE: 'memory', SUPPORT_PHONE: '0911000000' });
 
 const seed = structuredClone(DEMO_SEED);
 Object.assign(seed.merchants[0], { lat: 7.2, lng: 38.6, banner: 'DEMO_BANNER_M1' });
