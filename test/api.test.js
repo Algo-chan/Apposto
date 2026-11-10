@@ -217,12 +217,12 @@ test('payment ref: moves to PAYMENT_SUBMITTED; bad ref; used ref; too early', as
 test('me: language, saved phone and the open order', async () => {
   const { call, orderBody, store } = setup();
   let me = await call('GET', '/api/me');
-  assert.deepEqual(me.body, { lang: null, phone: '', openOrderId: null });
+  assert.deepEqual(me.body, { firstName: 'Abebe', lang: null, phone: '', openOrderId: null });
   assert.deepEqual((await call('POST', '/api/lang', { lang: 'om' })).body, { ok: true });
   assert.equal((await call('POST', '/api/lang', { lang: 'xx' })).body.error, 'BAD_REQUEST');
   const { orderId } = (await call('POST', '/api/orders', orderBody())).body;
   me = await call('GET', '/api/me');
-  assert.deepEqual(me.body, { lang: 'om', phone: '0911234567', openOrderId: orderId });
+  assert.deepEqual(me.body, { firstName: 'Abebe', lang: 'om', phone: '0911234567', openOrderId: orderId });
   assert.equal((await store.getCustomer('100')).lang, 'om');
 });
 
@@ -251,4 +251,33 @@ test('a badly encoded id is NOT_FOUND, not a server error', async () => {
   const { call } = setup();
   const r = await call('GET', '/api/orders/%E0%A4%A');
   assert.deepEqual([r.status, r.body.error], [404, 'NOT_FOUND']);
+});
+
+test('shops and menu carry a delivery estimate, the starting fee and the rating once there are enough reviews', async () => {
+  const { call, store } = setup();
+  const [fresh] = (await setup().call('GET', '/api/shops')).body.shops;
+  assert.equal(fresh.rating, null, 'no rating before enough reviews');
+  for (let i = 0; i < 5; i++) await store.createReview({ orderId: `R${i}`, merchantId: 'M1', foodStars: i < 4 ? 5 : 4 });
+  const [m1] = (await call('GET', '/api/shops')).body.shops;
+  assert.equal(m1.deliveryFeeFrom, 60);
+  assert.ok(m1.eta.min >= 15 && m1.eta.max === m1.eta.min + 10);
+  assert.deepEqual(m1.rating, { avg: 4.8, count: 5 });
+  const { shop } = (await call('GET', '/api/shops/M1/menu')).body;
+  assert.deepEqual(shop.rating, { avg: 4.8, count: 5 });
+  assert.equal(shop.deliveryFeeFrom, 60);
+  assert.deepEqual(shop.eta, m1.eta);
+});
+
+test('me carries the first name for the greeting', async () => {
+  const { call } = setup();
+  assert.equal((await call('GET', '/api/me')).body.firstName, 'Abebe');
+});
+
+test('order status carries the time of each step reached so far (HH:MM)', async () => {
+  const { call, orderBody, service, store } = setup();
+  const { orderId } = (await call('POST', '/api/orders', orderBody())).body;
+  await service.accept(orderId, 'M1', null);
+  await store.updateOrder(orderId, { createdAt: '2026-11-10 18:05:09', acceptedAt: '2026-11-10 18:07:41' });
+  const r = await call('GET', `/api/orders/${orderId}`);
+  assert.deepEqual(r.body.times, { PLACED: '18:05', ACCEPTED: '18:07' });
 });

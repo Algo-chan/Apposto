@@ -19,6 +19,8 @@ const MAX_QTY = 20;
 const IDEMPOTENCY_MS = 10 * 60 * 1000;
 const REQUEST_ID = /^[A-Za-z0-9-]{8,64}$/;
 const NO_PAY = new Set([STATUS.PLACED, STATUS.REJECTED, STATUS.CANCELLED]);
+// When each step was reached (for the order timeline); PAYMENT_SUBMITTED has no time of its own.
+const STEP_TIME = { PLACED: 'createdAt', ACCEPTED: 'acceptedAt', CONFIRMED: 'confirmedAt', READY: 'readyAt', PICKED_UP: 'pickedUpAt', DELIVERED: 'deliveredAt' };
 
 class ApiError extends Error {
   constructor(status, code) {
@@ -77,7 +79,7 @@ export function createWebApi({ store, config, insights, checkout, now = () => Da
     const open = (await store.listOrders({ customerId: user.id }))
       .filter((o) => !FINAL.has(o.status))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return { lang: c?.lang || null, phone: c?.phone || '', openOrderId: open[0]?.id ?? null };
+    return { firstName: user.firstName, lang: c?.lang || null, phone: c?.phone || '', openOrderId: open[0]?.id ?? null };
   }
 
   async function setLang(user, body) {
@@ -92,19 +94,30 @@ export function createWebApi({ store, config, insights, checkout, now = () => Da
     return { ok: true };
   }
 
+  /** What a shop card shows: banner, delivery estimate (typical distance), starting fee, rating. */
+  async function shopCard(m) {
+    return {
+      id: m.id,
+      names: m.names,
+      banner: imgUrl(m.banner),
+      prepMin: await insights.prepMinutes(m),
+      eta: await insights.eta(m, null),
+      deliveryFeeFrom: config.deliveryFeeBase,
+      rating: await insights.rating(m.id),
+    };
+  }
+
   async function shops() {
     const open = (await store.getMerchants()).filter((m) => m.active);
     const out = [];
-    for (const m of open) {
-      out.push({ id: m.id, names: m.names, prepMin: await insights.prepMinutes(m), banner: imgUrl(m.banner) });
-    }
+    for (const m of open) out.push(await shopCard(m));
     return { shops: out };
   }
 
   async function menu(merchantId) {
     const m = await activeShop(merchantId);
     const items = (await activeMenu(m.id)).map((i) => ({ id: i.id, names: i.names, price: i.price, photo: imgUrl(i.photo) }));
-    return { shop: { id: m.id, names: m.names, banner: imgUrl(m.banner) }, items };
+    return { shop: await shopCard(m), items };
   }
 
   async function quote(body) {
@@ -207,6 +220,11 @@ export function createWebApi({ store, config, insights, checkout, now = () => Da
       eta: await etaFor(order),
       pay,
       rider: order.riderId ? { name: order.riderName, phone: order.riderPhone } : null,
+      times: Object.fromEntries(
+        Object.entries(STEP_TIME)
+          .filter(([, field]) => /^\d{4}-\d\d-\d\d \d\d:\d\d/.test(order[field] || ''))
+          .map(([step, field]) => [step, order[field].slice(11, 16)])
+      ),
     };
   }
 
