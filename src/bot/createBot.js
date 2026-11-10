@@ -5,6 +5,7 @@ import { createOrderService } from '../core/orderService.js';
 import { createNotifier } from './notify.js';
 import { registerOps } from './ops.js';
 import { registerCustomer } from './customer.js';
+import { registerPhotos } from './photos.js';
 import { createInsights } from './insights.js';
 import { registerReviews } from './reviews.js';
 import { t, LANGS } from '../i18n.js';
@@ -68,6 +69,7 @@ export function createBot({ config, store, botInfo, now, images, warmImages = tr
   });
 
   registerOps(bot, deps); // first: merchant price input must win over customer text handling
+  registerPhotos(bot, deps); // admins' item photos and shop banners
   registerReviews(bot, deps); // before customer: it catches the review comment text
   registerCustomer(bot, deps);
 
