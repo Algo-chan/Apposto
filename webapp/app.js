@@ -330,7 +330,13 @@ function shopsScreen() {
   const head = h(
     'header',
     { class: 'hero-head' },
-    h('div', { class: 'brand-row' }, h('img', { src: '/app/logo.png', alt: '' }), h('div', {}, h('div', { class: 'brand' }, state.me?.brand || ''), h('div', { class: 'where' }, `📍 ${T('deliveringIn')}`))),
+    h(
+      'div',
+      { class: 'brand-row' },
+      h('img', { src: '/app/logo.png', alt: '' }),
+      h('div', {}, h('div', { class: 'brand' }, state.me?.brand || ''), h('div', { class: 'where' }, `📍 ${T('deliveringIn')}`)),
+      h('button', { class: 'lang-btn', 'aria-label': T('language'), onclick: () => go('lang') }, `🌐 ${state.lang.toUpperCase()}`)
+    ),
     h('div', { class: 'greet' }, greeting()),
     h('p', { class: 'greet-sub' }, T('hungryLine')),
     h('label', { class: 'search' }, h('span', { 'aria-hidden': 'true' }, '🔍'), search)
@@ -898,9 +904,37 @@ function statusScreen() {
       : null,
     STAGES.includes(o.status) ? h('div', { class: 'card' }, cardTitle('🧭', T('trackTitle')), timeline(o)) : null,
     h('div', { class: 'card' }, cardTitle('🧾', T('orderDetails')), lines),
+    o.canCancel ? h('button', { class: 'cancel-link', onclick: askCancel }, T('cancelOrder')) : null,
     h('p', { class: 'muted small pad', style: 'margin-top:12px;text-align:center' }, T('chatNote')),
     action,
   ];
+}
+
+/** "Cancel this order?" then cancel (only while the shop has not confirmed the payment). */
+function askCancel() {
+  if (nativeBack && tg.showPopup) {
+    tg.showPopup(
+      { message: T('cancelConfirm'), buttons: [{ id: 'yes', type: 'destructive', text: T('cancelYes') }, { id: 'no', type: 'cancel' }] },
+      (id) => id === 'yes' && cancelOrder()
+    );
+  } else if (window.confirm(T('cancelConfirm'))) cancelOrder();
+}
+
+async function cancelOrder() {
+  if (state.busy) return;
+  state.busy = true;
+  renderKeepingRef();
+  const res = await api(`/api/orders/${encodeURIComponent(state.orderId)}/cancel`, { method: 'POST', body: {} });
+  state.busy = false;
+  if (!res.ok) {
+    const code = failed(res);
+    if (code === 'UNAUTHORIZED') return;
+    state.error = T(`err_${code}`);
+    return renderKeepingRef();
+  }
+  haptic?.notificationOccurred('warning');
+  if (state.me) state.me.openOrderId = null;
+  openStatus(state.orderId, { fresh: true });
 }
 
 start();

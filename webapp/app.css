@@ -47,6 +47,9 @@ p { margin: 0; }
 .brand-row img { width: 38px; height: 38px; border-radius: 11px; box-shadow: 0 2px 8px rgb(0 0 0 / 20%); }
 .brand-row .brand { font-weight: 800; font-size: 17px; }
 .brand-row .where { font-size: 12px; opacity: 0.85; display: flex; align-items: center; gap: 4px; }
+.lang-btn { margin-left: auto; background: rgb(255 255 255 / 18%); color: #fff; border-radius: 999px; padding: 7px 11px; font-size: 13px; font-weight: 800; }
+.cancel-link { display: block; margin: 16px auto 0; padding: 10px 16px; color: var(--red); font-weight: 700; border-radius: 12px; }
+.cancel-link:hover { background: var(--red-soft); }
 .greet { margin-top: 18px; font-size: 24px; font-weight: 800; line-height: 1.2; position: relative; z-index: 1; }
 .greet-sub { margin-top: 4px; opacity: 0.9; position: relative; z-index: 1; }
 .search {

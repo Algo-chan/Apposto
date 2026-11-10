@@ -5,6 +5,7 @@
 export const ERROR_CODES = [
   'UNAUTHORIZED', 'NOT_FOUND', 'SHOP_CLOSED', 'ITEM_GONE', 'OUT_OF_RANGE', 'BAD_TRANSITION',
   'DUPLICATE_REF', 'BAD_PHONE', 'BAD_LANDMARK', 'EMPTY', 'BAD_REF', 'BAD_REQUEST', 'ERROR', 'NETWORK',
+  'TOO_LATE', 'TOO_MANY_ORDERS', 'RATE_LIMITED',
 ];
 
 export const STRINGS = {
@@ -128,6 +129,13 @@ export const STRINGS = {
     tl_PICKED_UP: 'On the way',
     tl_DELIVERED: 'Delivered',
     loading: 'Loading…',
+    err_TOO_LATE: "The shop has already confirmed your payment, so it can no longer be cancelled here. Please call support.",
+    err_TOO_MANY_ORDERS: "You have several orders in progress. Please wait for them before ordering again.",
+    err_RATE_LIMITED: "Too many taps at once. Please wait a moment and try again.",
+    cancelOrder: "Cancel order",
+    cancelConfirm: "Cancel this order?",
+    cancelYes: "Yes, cancel",
+    language: "Language",
   },
   om: {
     chooseLang: 'Afaan keessan filadhaa',
@@ -249,6 +257,13 @@ export const STRINGS = {
     tl_PICKED_UP: 'Karaa irra jira',
     tl_DELIVERED: 'Ga\'eera',
     loading: 'Fe\'aa jira…',
+    err_TOO_LATE: "Suuqiin kaffaltii keessan mirkaneesseera, kanaaf asitti haquun hin danda'amu. Maaloo deeggarsa bilbilaa.",
+    err_TOO_MANY_ORDERS: "Ajajoota hedduu adeemsa irra qabdu. Maaloo isaan eegaatii booda ajajaa.",
+    err_RATE_LIMITED: "Yeroo tokkotti baay'ee tuqxan. Maaloo xiqqoo eegaatii irra deebi'aa yaalaa.",
+    cancelOrder: "Ajaja haqi",
+    cancelConfirm: "Ajaja kana haqxuu?",
+    cancelYes: "Eeyyee, haqi",
+    language: "Afaan",
   },
   am: {
     chooseLang: 'ቋንቋዎን ይምረጡ',
@@ -370,6 +385,13 @@ export const STRINGS = {
     tl_PICKED_UP: 'በመንገድ ላይ',
     tl_DELIVERED: 'ደርሷል',
     loading: 'በመጫን ላይ…',
+    err_TOO_LATE: "ሱቁ ክፍያዎን አስቀድሞ አረጋግጧል፣ ስለዚህ እዚህ መሰረዝ አይቻልም። እባክዎ ድጋፍ ይደውሉ።",
+    err_TOO_MANY_ORDERS: "በሂደት ላይ ያሉ ብዙ ትዕዛዞች አሉዎት። እባክዎ እስኪጠናቀቁ ይጠብቁ።",
+    err_RATE_LIMITED: "በአንድ ጊዜ በጣም ብዙ ነኩ። እባክዎ ትንሽ ቆይተው እንደገና ይሞክሩ።",
+    cancelOrder: "ትዕዛዙን ሰርዝ",
+    cancelConfirm: "ይህን ትዕዛዝ ይሰርዛሉ?",
+    cancelYes: "አዎ፣ ሰርዝ",
+    language: "ቋንቋ",
   },
 };
 

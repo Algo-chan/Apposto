@@ -70,7 +70,9 @@ const photos = { get: async (id) => (id.startsWith('DEMO_') ? demoPicture(id) : 
 const initData = signInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 100, first_name: 'Demo', last_name: 'Customer' }) }, TOKEN);
 const staticFiles = loadStaticFiles('webapp', { '/app/payment-guide.png': config.paymentGuidePath, '/app/logo.png': 'assets/images/logo.png' });
 const page = staticFiles.get('/app/index.html');
-const injected = { ...page, body: Buffer.from(page.body.toString('utf8').replace('<head>', `<head>\n  <script>window.__DEV_INIT_DATA__ = ${JSON.stringify(initData)};</script>`)) };
+// a separate file, not an inline script: the page's content policy only runs our own files
+staticFiles.set('/app/dev-init.js', { body: Buffer.from(`window.__DEV_INIT_DATA__ = ${JSON.stringify(initData)};`), type: 'text/javascript; charset=utf-8', cache: 'no-cache' });
+const injected = { ...page, body: Buffer.from(page.body.toString('utf8').replace('<head>', '<head>\n  <script src="/app/dev-init.js"></script>')) };
 for (const p of ['/app', '/app/', '/app/index.html']) staticFiles.set(p, injected);
 
 const api = createWebApi({ store, config, insights, checkout });
