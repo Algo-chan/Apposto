@@ -1,4 +1,4 @@
-// All settings come from environment variables (.env file). See .env.example.
+// All settings come from environment variables (.env file locally, Environment on Render).
 import { createPrivateKey } from 'node:crypto';
 import fs from 'node:fs';
 
@@ -142,7 +142,7 @@ export function loadConfig(env = process.env) {
       if (hasBase64) {
         if (!fromBase64) {
           problems.push(
-            'GOOGLE_CREDENTIALS_BASE64 could not be decoded. Re-generate it (DEPLOY.md), or use a Render Secret File.'
+            'GOOGLE_CREDENTIALS_BASE64 could not be decoded. Re-generate it from the key file, or use a Render Secret File.'
           );
         } else if (!fromBase64.key) {
           problems.push(
@@ -166,7 +166,7 @@ export function loadConfig(env = process.env) {
               `Source: ${credentialsSource}; key chars: ${config.googlePrivateKey.length}; ` +
               `header: ${config.googlePrivateKey.includes('-----BEGIN') ? 'yes' : 'no'}; ` +
               `footer: ${config.googlePrivateKey.includes('-----END') ? 'yes' : 'no'}. ` +
-              'Use a Render Secret File (DEPLOY.md) or reset GOOGLE_CREDENTIALS_BASE64.'
+              'Use a Render Secret File or reset GOOGLE_CREDENTIALS_BASE64.'
           );
         }
       }

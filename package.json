@@ -5,10 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "demo": "node src/index.js --demo",
-    "setup-sheet": "node scripts/setup-sheet.js",
-    "test": "node --test",
-    "preview-app": "node scripts/preview-app.js"
+    "setup-sheet": "node scripts/setup-sheet.js"
   },
   "author": "",
   "license": "UNLICENSED",
