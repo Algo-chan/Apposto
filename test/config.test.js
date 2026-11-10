@@ -65,3 +65,19 @@ test('a broken private key produces a clear config error, not a crypto crash', (
   });
   assert.ok(problems.some((p) => p.includes('not valid PEM')));
 });
+
+test('appUrl: APP_URL wins, else RENDER_EXTERNAL_URL + /app, else empty', () => {
+  const base = { BOT_TOKEN: '1:t', STORAGE: 'memory' };
+  const quiet = (env) => {
+    const w = console.warn;
+    console.warn = () => {};
+    try {
+      return loadConfig(env).config.appUrl;
+    } finally {
+      console.warn = w;
+    }
+  };
+  assert.equal(quiet({ ...base, APP_URL: 'https://x.test/shop', RENDER_EXTERNAL_URL: 'https://r.test' }), 'https://x.test/shop');
+  assert.equal(quiet({ ...base, RENDER_EXTERNAL_URL: 'https://x.onrender.com/' }), 'https://x.onrender.com/app');
+  assert.equal(quiet(base), '');
+});

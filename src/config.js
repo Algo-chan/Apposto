@@ -96,6 +96,11 @@ export function loadConfig(env = process.env) {
     // Screenshot shown by the "Where do I find the reference?" button (text is used if the file is missing)
     paymentGuidePath: env.PAYMENT_GUIDE_PATH || 'assets/images/payment-guide.png',
     brandName: env.BRAND_NAME || 'Delivery',
+    // The mini app's address (must be https). Render sets RENDER_EXTERNAL_URL itself, so on
+    // Render nothing needs setting; empty = no app buttons, chat ordering only.
+    appUrl:
+      env.APP_URL ||
+      (env.RENDER_EXTERNAL_URL ? `${String(env.RENDER_EXTERNAL_URL).replace(/\/+$/, '')}/app` : ''),
 
     // Money (birr)
     deliveryFeeBase: num(env, 'DELIVERY_FEE_BASE', 60),

@@ -66,12 +66,12 @@ export function registerCustomer(bot, { store, service, config, notify, insights
       await replyKeyboard(ctx, t(lang, justChoseLanguage ? 'langSet' : 'homeLine'), mainMenu(lang));
     }
     const caption = th(lang, 'welcomeCaption', { brand: config.brandName });
-    const other = { caption, ...HTML, reply_markup: homeInline(lang) };
+    const other = { caption, ...HTML, reply_markup: homeInline(lang, config.appUrl) };
     const photo = await notify.sendPhotoCached(ctx.chat.id, `banner:${lang}`, { kind: 'banner', lang }, other);
-    if (!photo) await ctx.reply(caption, { ...HTML, reply_markup: homeInline(lang) });
+    if (!photo) await ctx.reply(caption, { ...HTML, reply_markup: homeInline(lang, config.appUrl) });
   }
   function useMenu(ctx) {
-    return ctx.reply(t(L(ctx), 'useMenu'), { reply_markup: homeInline(L(ctx)) });
+    return ctx.reply(t(L(ctx), 'useMenu'), { reply_markup: homeInline(L(ctx), config.appUrl) });
   }
   async function editOrReply(ctx, text, reply_markup, other = {}) {
     if (ctx.callbackQuery?.message) {
@@ -134,7 +134,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
   });
 
   const showLang = (ctx) => ctx.reply(t(L(ctx), 'chooseLang'), { reply_markup: langKeyboard() });
-  const showHelp = (ctx) => ctx.reply(t(L(ctx), 'helpText', { phone: config.supportPhone }), { reply_markup: homeInline(L(ctx)) });
+  const showHelp = (ctx) => ctx.reply(t(L(ctx), 'helpText', { phone: config.supportPhone }), { reply_markup: homeInline(L(ctx), config.appUrl) });
   pm.hears(allTexts('btnLang'), showLang);
   pm.command('help', showHelp);
   pm.hears(allTexts('btnHelp'), showHelp);
@@ -151,9 +151,17 @@ export function registerCustomer(bot, { store, service, config, notify, insights
   });
 
   // ---------- browsing ----------
+  // With the mini app: a message with Open shop (an inline web-app button: one in the bottom
+  // keyboard would open the app without the signed user data the server needs) + chat ordering.
   pm.hears(allTexts('btnOrder'), async (ctx) => {
     resetFlow(ctx);
-    return showMerchants(ctx);
+    if (!config.appUrl) return showMerchants(ctx);
+    const lang = L(ctx);
+    const kb = new InlineKeyboard()
+      .webApp(t(lang, 'btnOpenShop'), config.appUrl)
+      .row()
+      .text(t(lang, 'btnOrderInChat'), 'menu:order');
+    return ctx.reply(t(lang, 'openShopPrompt'), { reply_markup: kb });
   });
 
   pm.callbackQuery('back', async (ctx) => {
@@ -271,7 +279,22 @@ export function registerCustomer(bot, { store, service, config, notify, insights
   }
 
   pm.on('message:contact', async (ctx) => {
-    if (ctx.session.step !== 'phone') return useMenu(ctx);
+    if (ctx.session.step !== 'phone') {
+      // "Share my Telegram number" in the mini app sends the customer's own contact here: keep
+      // the number for next time, without a reply. Anyone else's contact gets the usual hint.
+      const { contact } = ctx.message;
+      const phone = normalizePhone(contact.phone_number);
+      if (contact.user_id === ctx.from.id && phone) {
+        const known = await store.getCustomer(ctx.from.id);
+        return store.saveCustomer({
+          id: String(ctx.from.id),
+          name: known?.name || customerName(ctx.from),
+          phone,
+          ...(known ? {} : { lang: L(ctx), createdAt: localTimestamp() }),
+        });
+      }
+      return useMenu(ctx);
+    }
     return setPhone(ctx, ctx.message.contact.phone_number);
   });
 
@@ -379,7 +402,7 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     const orders = (await store.listOrders({ customerId: ctx.from.id }))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, 5);
-    if (orders.length === 0) return ctx.reply(t(lang, 'noOrders'), { reply_markup: homeInline(lang) });
+    if (orders.length === 0) return ctx.reply(t(lang, 'noOrders'), { reply_markup: homeInline(lang, config.appUrl) });
     const kb = new InlineKeyboard();
     const lines = [t(lang, 'myOrdersTitle'), ''];
     for (const o of orders) {

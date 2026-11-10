@@ -23,10 +23,15 @@ export function langKeyboard() {
   return kb;
 }
 
-/** Inline version of the main menu: always visible inside the message, also on Telegram Desktop. */
-export function homeInline(lang) {
-  return new InlineKeyboard()
-    .text(t(lang, 'btnStartOrder'), 'menu:order')
+/**
+ * Inline version of the main menu: always visible inside the message, also on Telegram Desktop.
+ * appUrl: the mini app; its Open shop button comes first, with chat ordering next to it.
+ */
+export function homeInline(lang, appUrl = '') {
+  const kb = new InlineKeyboard();
+  if (appUrl) kb.webApp(t(lang, 'btnOpenShop'), appUrl).text(t(lang, 'btnOrderInChat'), 'menu:order');
+  else kb.text(t(lang, 'btnStartOrder'), 'menu:order');
+  return kb
     .row()
     .text(t(lang, 'btnMyOrders'), 'menu:orders')
     .text(t(lang, 'btnHelp'), 'menu:help')

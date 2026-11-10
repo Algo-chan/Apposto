@@ -62,3 +62,18 @@ test('summary: HTML-escaped values and a clear split of who gets paid what', () 
   assert.match(text, /📞 <code>0911234567<\/code>/);
   assert.match(text, /about 30–40 min/);
 });
+
+test('homeInline with an app url starts with Open shop (web app) and Order in chat', async () => {
+  const { homeInline } = await import('../src/bot/ui.js');
+  const { t } = await import('../src/i18n.js');
+  const kb = homeInline('en', 'https://x.test/app');
+  const [open, chat] = kb.inline_keyboard[0];
+  assert.equal(open.text, t('en', 'btnOpenShop'));
+  assert.deepEqual(open.web_app, { url: 'https://x.test/app' });
+  assert.equal(chat.text, t('en', 'btnOrderInChat'));
+  assert.equal(chat.callback_data, 'menu:order');
+  assert.ok(kb.inline_keyboard.flat().some((b) => b.callback_data === 'menu:orders'));
+  // without one: unchanged
+  assert.equal(homeInline('en').inline_keyboard[0][0].callback_data, 'menu:order');
+  assert.equal(homeInline('en').inline_keyboard.flat().some((b) => b.web_app), false);
+});

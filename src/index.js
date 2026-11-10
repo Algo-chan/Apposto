@@ -2,6 +2,7 @@ import http from 'node:http';
 import { run } from '@grammyjs/runner';
 import dotenv from 'dotenv';
 import { loadConfig } from './config.js';
+import { t } from './i18n.js';
 import { createBot } from './bot/createBot.js';
 import { applyProfile } from './bot/profile.js';
 import { createMemoryStore, DEMO_SEED } from './storage/memoryStore.js';
@@ -75,6 +76,16 @@ try {
   console.error(`❌ Could not reach Telegram: ${err.description || err.message}`);
   console.error('   Check BOT_TOKEN in .env and your internet connection.');
   process.exit(1);
+}
+// The ☰ button next to the message box opens the mini app (when there is one).
+if (config.appUrl) {
+  try {
+    await bot.api.setChatMenuButton({
+      menu_button: { type: 'web_app', text: t('en', 'menuButtonText'), web_app: { url: config.appUrl } },
+    });
+  } catch (err) {
+    console.error(`⚠️ Could not set the mini app menu button: ${err.description || err.message}`);
+  }
 }
 // The profile text is nice to have: the bot runs without it.
 try {

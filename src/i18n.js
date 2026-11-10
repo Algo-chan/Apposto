@@ -38,6 +38,16 @@ const S = {
   },
   bannerCta: { en: 'Start an order', om: 'Ajaja jalqabi', am: 'ትዕዛዝ ይጀምሩ' },
   btnStartOrder: { en: '🛍 Start an order', om: '🛍 Ajaja jalqabi', am: '🛍 ትዕዛዝ ይጀምሩ' },
+  // Mini app (the shop with photos, opened inside Telegram)
+  btnOpenShop: { en: '🛍 Open shop', om: '🛍 Suuqii bani', am: '🛍 ሱቁን ክፈት' },
+  btnOrderInChat: { en: '💬 Order in chat', om: '💬 Chaatii keessatti ajajadhu', am: '💬 በቻት ይዘዙ' },
+  openShopPrompt: {
+    en: 'Tap 🛍 Open shop to see the shops and photos, or order here in the chat.',
+    om: 'Suuqiiwwanii fi suuraalee arguuf 🛍 Suuqii bani tuqaa, yookaan as chaatii keessatti ajajadhaa.',
+    am: 'ሱቆቹንና ፎቶዎቹን ለማየት 🛍 ሱቁን ክፈት ይንኩ፣ ወይም እዚሁ በቻት ይዘዙ።',
+  },
+  // the button next to the message box; Telegram shows one text for everyone
+  menuButtonText: { en: '🛍 Shop', om: '🛍 Shop', am: '🛍 Shop' },
   langSet: { en: '🌐 English ✅', om: '🌐 Afaan Oromoo ✅', am: '🌐 አማርኛ ✅' },
   homeLine: { en: '🏠 Home', om: '🏠 Fuula jalqabaa', am: '🏠 መነሻ' },
   btnOrder: { en: '🛍 Order', om: '🛍 Ajajuu', am: '🛍 ይዘዙ' },
