@@ -243,6 +243,27 @@ phone, in your private chat with the bot (only people in `ADMIN_IDS` can do this
 Tips: a wide picture works best for banners (about 2:1); a square-ish one for items. Telegram
 keeps the pictures; the sheet only stores a short code for each.
 
+### Mini app (the shop with photos)
+
+Customers can order inside a small app in Telegram: shops with banners, items with photos, the
+basket, location, phone, then the payment details and reference — all on one page. The chat
+ordering still works as a backup ("💬 Order in chat").
+
+- **Nothing to set on Render.** The app lives at `https://<your-service>.onrender.com/app`; the
+  bot finds that address itself (`RENDER_EXTERNAL_URL`). Elsewhere, set `APP_URL` to the
+  app's https address.
+- After a deploy, customers open it with **🛍 Open shop** (in the welcome message, or after
+  tapping 🛍 Order) or the **☰ Shop** button next to the message box.
+- Shops, the dispatch group and riders get exactly the same messages as for chat orders, and
+  the customer's chat still gets the live tracker card.
+- **Keep the service awake** (section 5): when it is asleep, the app shows "Connecting…" for up
+  to about a minute the first time.
+- **Test it on your phone** after deploying: open the bot, tap 🛍 Open shop, place a small order,
+  accept it as the shop (or as admin from the group), pay, send the reference in the app, and
+  check the tracker card in the chat.
+- To try the app on your computer with demo data (nothing is sent to Telegram or the sheet):
+  `npm run preview-app`, then open the address it prints.
+
 ---
 
 ## Troubleshooting
