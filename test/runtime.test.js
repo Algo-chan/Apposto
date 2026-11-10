@@ -72,7 +72,8 @@ test('keep-alive pings /health', async () => {
     intervalMs: 10,
     fetchFn: async (u) => { urls.push(u); },
   });
-  await sleep(35);
+  // wait for two pings (up to 2 s: a busy test machine can delay 10 ms timers a lot)
+  for (let waited = 0; urls.length < 2 && waited < 2000; waited += 10) await sleep(10);
   stop();
   assert.ok(urls.length >= 2);
   assert.ok(urls.every((u) => u === 'https://x.onrender.com/health'));
