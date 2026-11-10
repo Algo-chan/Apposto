@@ -226,6 +226,23 @@ assets/images/payment-guide.png
 - Without the file the button still works: the customer gets the written steps only.
 - To use another file name or folder, set `PAYMENT_GUIDE_PATH`.
 
+### Photos of items and shop banners
+
+The mini app shows a photo for each menu item and a banner for each shop. You add them from your
+phone, in your private chat with the bot (only people in `ADMIN_IDS` can do this):
+
+1. Once, after deploying this update: run `npm run setup-sheet` (it adds the `photo` column to
+   **Menu** and the `banner` column to **Merchants**), then restart the service.
+2. Send a picture **as a photo** (not as a file), with a caption:
+   - `I1` — the photo of menu item I1 (the `item_id` in the Menu tab)
+   - `banner M1` — the banner of shop M1 (the `merchant_id` in the Merchants tab)
+3. The bot sends the picture back with **✅ Saved**. Sending another photo with the same caption
+   replaces it. To remove one, clear its cell in the sheet.
+4. Send `/photos` to see which shops and items still have no picture.
+
+Tips: a wide picture works best for banners (about 2:1); a square-ish one for items. Telegram
+keeps the pictures; the sheet only stores a short code for each.
+
 ---
 
 ## Troubleshooting
