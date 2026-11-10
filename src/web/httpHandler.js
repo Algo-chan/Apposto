@@ -4,6 +4,20 @@ import { verifyInitData } from './initData.js';
 const FILE_ID = /^[A-Za-z0-9_-]{10,255}$/;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 const MAX_BODY = 16 * 1024;
+// The page may only load our own files, Telegram's script and Google's font; nothing else can
+// run in it, and only Telegram may show it inside a frame.
+const PAGE_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' https://telegram.org",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "object-src 'none'",
+  "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org",
+].join('; ');
 
 function notFound(res) {
   res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -74,6 +88,8 @@ export function createHttpHandler({ health, photos, api = null, staticFiles = nu
   }
 
   return async (req, res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
     try {
       let path;
       try {
@@ -96,6 +112,7 @@ export function createHttpHandler({ health, photos, api = null, staticFiles = nu
 
       const file = staticFiles?.get(path);
       if (file && (req.method === 'GET' || req.method === 'HEAD')) {
+        if (file.type.startsWith('text/html')) res.setHeader('Content-Security-Policy', PAGE_POLICY);
         res.writeHead(200, { 'Content-Type': file.type, 'Content-Length': file.body.length, 'Cache-Control': file.cache });
         return res.end(req.method === 'HEAD' ? undefined : file.body);
       }

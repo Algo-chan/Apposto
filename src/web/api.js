@@ -5,6 +5,7 @@ import { LANGS } from '../i18n.js';
 import {
   STATUS,
   FINAL,
+  CUSTOMER_CANCELLABLE,
   OrderError,
   roadDistanceKm,
   calcDeliveryFee,
@@ -19,6 +20,12 @@ const MAX_QTY = 20;
 const IDEMPOTENCY_MS = 10 * 60 * 1000;
 const REQUEST_ID = /^[A-Za-z0-9-]{8,64}$/;
 const NO_PAY = new Set([STATUS.PLACED, STATUS.REJECTED, STATUS.CANCELLED]);
+// Abuse limits per customer: unfinished orders at once, new orders an hour, API calls a minute.
+const MAX_OPEN_ORDERS = 3;
+const MAX_ORDERS_PER_HOUR = 6;
+const MAX_REQUESTS_PER_MIN = 120;
+const HOUR_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
 // When each step was reached (for the order timeline); PAYMENT_SUBMITTED has no time of its own.
 const STEP_TIME = { PLACED: 'createdAt', ACCEPTED: 'acceptedAt', CONFIRMED: 'confirmedAt', READY: 'readyAt', PICKED_UP: 'pickedUpAt', DELIVERED: 'deliveredAt' };
 
@@ -40,6 +47,7 @@ const ORDER_ERRORS = {
   BAD_TRANSITION: [409, 'BAD_TRANSITION'],
   DUPLICATE_REF: [409, 'DUPLICATE_REF'],
   INVALID: [400, 'BAD_REQUEST'],
+  TOO_LATE: [409, 'TOO_LATE'],
 };
 
 const imgUrl = (fileId) => (fileId ? `/img/${fileId}` : null);
@@ -47,6 +55,8 @@ const isPoint = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng);
 
 export function createWebApi({ store, config, insights, checkout, now = () => Date.now() }) {
   const recent = new Map(); // `${userId}:${requestId}` -> { at, job }
+  const ordersByUser = new Map(); // userId -> times of new orders in the last hour
+  const requests = new Map(); // userId -> { start, count } for the current minute
 
   async function activeShop(id) {
     const m = await store.getMerchant(String(id ?? ''));
@@ -158,6 +168,21 @@ export function createWebApi({ store, config, insights, checkout, now = () => Da
     };
   }
 
+  /** New orders this customer placed in the last hour (times), kept in memory. */
+  function placedAt(userId) {
+    const cutoff = now() - HOUR_MS;
+    const list = (ordersByUser.get(userId) || []).filter((at) => at > cutoff);
+    ordersByUser.set(userId, list);
+    return list;
+  }
+
+  /** Stops order floods: a few unfinished orders at a time, a few new ones an hour. */
+  async function checkOrderLimits(user) {
+    const open = (await store.listOrders({ customerId: user.id })).filter((o) => !FINAL.has(o.status));
+    if (open.length >= MAX_OPEN_ORDERS) fail(429, 'TOO_MANY_ORDERS');
+    if (placedAt(user.id).length >= MAX_ORDERS_PER_HOUR) fail(429, 'TOO_MANY_ORDERS');
+  }
+
   /** One order per (customer, requestId) for 10 minutes, also when both requests arrive at once. */
   async function placeOrder(user, body) {
     if (!REQUEST_ID.test(String(body?.requestId ?? ''))) fail(400, 'BAD_REQUEST');
@@ -167,7 +192,9 @@ export function createWebApi({ store, config, insights, checkout, now = () => Da
     const hit = recent.get(key);
     if (hit) return hit.job;
     const job = (async () => {
+      await checkOrderLimits(user);
       const order = await checkout.placeAndNotify(await buildOrder(user, body));
+      placedAt(user.id).push(now());
       return { orderId: order.id };
     })();
     recent.set(key, { at: t, job });
@@ -219,6 +246,7 @@ export function createWebApi({ store, config, insights, checkout, now = () => Da
       serviceFee: order.serviceFee,
       eta: await etaFor(order),
       pay,
+      canCancel: CUSTOMER_CANCELLABLE.has(order.status),
       rider: order.riderId ? { name: order.riderName, phone: order.riderPhone } : null,
       times: Object.fromEntries(
         Object.entries(STEP_TIME)
@@ -236,6 +264,25 @@ export function createWebApi({ store, config, insights, checkout, now = () => Da
     return { status: order.status };
   }
 
+  async function cancel(user, id) {
+    await ownOrder(user, id);
+    const order = await checkout.cancelByCustomer({ orderId: String(id), customerId: user.id });
+    return { status: order.status };
+  }
+
+  /** At most MAX_REQUESTS_PER_MIN API calls per customer per minute (fixed one-minute windows). */
+  function overRequestLimit(userId) {
+    const t = now();
+    if (requests.size > 5000) for (const [k, w] of requests) if (t - w.start >= MINUTE_MS) requests.delete(k);
+    let w = requests.get(userId);
+    if (!w || t - w.start >= MINUTE_MS) {
+      w = { start: t, count: 0 };
+      requests.set(userId, w);
+    }
+    w.count += 1;
+    return w.count > MAX_REQUESTS_PER_MIN;
+  }
+
   const ROUTES = [
     ['GET', /^\/api\/me$/, (u) => me(u)],
     ['POST', /^\/api\/lang$/, (u, b) => setLang(u, b)],
@@ -245,10 +292,12 @@ export function createWebApi({ store, config, insights, checkout, now = () => Da
     ['POST', /^\/api\/orders$/, (u, b) => placeOrder(u, b)],
     ['GET', /^\/api\/orders\/([^/]+)$/, (u, b, [id]) => orderStatus(u, id)],
     ['POST', /^\/api\/orders\/([^/]+)\/ref$/, (u, b, [id]) => submitRef(u, id, b)],
+    ['POST', /^\/api\/orders\/([^/]+)\/cancel$/, (u, b, [id]) => cancel(u, id)],
   ];
 
   /** -> { status, body }. Never throws. */
   async function handle(method, path, { user, body } = {}) {
+    if (user && overRequestLimit(user.id)) return { status: 429, body: { error: 'RATE_LIMITED' } };
     for (const [m, re, fn] of ROUTES) {
       const match = re.exec(path);
       if (!match || m !== method) continue;

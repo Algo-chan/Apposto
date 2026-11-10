@@ -14,7 +14,7 @@ const OTHER = { id: '200', firstName: 'Other', lastName: '', languageCode: '' };
 const NEAR = { lat: 7.205, lng: 38.6 }; // ~0.7 km road distance from M1
 const FAR = { lat: 7.25, lng: 38.6 };
 
-function setup() {
+function setup({ now } = {}) {
   const origWarn = console.warn;
   console.warn = () => {};
   const { config } = loadConfig({ BOT_TOKEN: '1:test', STORAGE: 'memory' });
@@ -39,10 +39,10 @@ function setup() {
     toMerchant: async (m, key) => sent.push({ to: 'shop', key }),
     dispatch: async (text) => sent.push({ to: 'group', text }),
   };
-  const tracker = { update: () => Promise.resolve() };
+  const tracker = { update: () => Promise.resolve(), close: () => Promise.resolve() };
   const checkout = createCheckoutFlow({ store, service, notify, tracker });
   const insights = createInsights({ store, config });
-  const api = createWebApi({ store, config, insights, checkout });
+  const api = createWebApi({ store, config, insights, checkout, ...(now ? { now } : {}) });
   const call = (method, path, body, user = USER) => api.handle(method, path, { user, body });
   let n = 0;
   const orderBody = (over = {}) => ({
@@ -280,4 +280,55 @@ test('order status carries the time of each step reached so far (HH:MM)', async 
   await store.updateOrder(orderId, { createdAt: '2026-11-10 18:05:09', acceptedAt: '2026-11-10 18:07:41' });
   const r = await call('GET', `/api/orders/${orderId}`);
   assert.deepEqual(r.body.times, { PLACED: '18:05', ACCEPTED: '18:07' });
+});
+
+test('cancel from the app: waiting orders only, own orders only; status says whether it can be cancelled', async () => {
+  const { call, orderBody, service } = setup();
+  const a = (await call('POST', '/api/orders', orderBody())).body.orderId;
+  assert.equal((await call('GET', `/api/orders/${a}`)).body.canCancel, true);
+  const other = await call('POST', `/api/orders/${a}/cancel`, {}, OTHER);
+  assert.deepEqual([other.status, other.body.error], [404, 'NOT_FOUND']);
+  const ok = await call('POST', `/api/orders/${a}/cancel`, {});
+  assert.deepEqual([ok.status, ok.body.status], [200, 'CANCELLED']);
+  assert.equal((await call('GET', `/api/orders/${a}`)).body.canCancel, false);
+
+  const b = (await call('POST', '/api/orders', orderBody())).body.orderId;
+  await service.accept(b, 'M1', null);
+  await service.transition(b, STATUS.PAYMENT_SUBMITTED, { paymentRef: 'CK1234XY' });
+  await service.transition(b, STATUS.CONFIRMED);
+  const late = await call('POST', `/api/orders/${b}/cancel`, {});
+  assert.deepEqual([late.status, late.body.error], [409, 'TOO_LATE']);
+});
+
+test('at most 3 unfinished orders at a time', async () => {
+  const { call, orderBody } = setup();
+  const ids = [];
+  for (let i = 0; i < 3; i++) ids.push((await call('POST', '/api/orders', orderBody())).body.orderId);
+  const fourth = await call('POST', '/api/orders', orderBody());
+  assert.deepEqual([fourth.status, fourth.body.error], [429, 'TOO_MANY_ORDERS']);
+  await call('POST', `/api/orders/${ids[0]}/cancel`, {});
+  assert.equal((await call('POST', '/api/orders', orderBody())).status, 200);
+});
+
+test('at most 6 new orders an hour, counted per customer', async () => {
+  const s = setup();
+  for (let i = 0; i < 6; i++) {
+    const { orderId } = (await s.call('POST', '/api/orders', s.orderBody())).body;
+    assert.ok(orderId, `order ${i + 1}`);
+    await s.call('POST', `/api/orders/${orderId}/cancel`, {});
+  }
+  const seventh = await s.call('POST', '/api/orders', s.orderBody());
+  assert.deepEqual([seventh.status, seventh.body.error], [429, 'TOO_MANY_ORDERS']);
+  assert.equal((await s.call('POST', '/api/orders', s.orderBody(), OTHER)).status, 200);
+});
+
+test('more than 120 requests a minute from one customer are refused for that minute', async () => {
+  let now = 1_000_000;
+  const s = setup({ now: () => now });
+  for (let i = 0; i < 120; i++) assert.equal((await s.call('GET', '/api/shops')).status, 200);
+  const over = await s.call('GET', '/api/shops');
+  assert.deepEqual([over.status, over.body.error], [429, 'RATE_LIMITED']);
+  assert.equal((await s.call('GET', '/api/shops', undefined, OTHER)).status, 200);
+  now += 61_000;
+  assert.equal((await s.call('GET', '/api/shops')).status, 200);
 });

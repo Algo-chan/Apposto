@@ -415,22 +415,16 @@ export function registerCustomer(bot, { store, service, config, notify, insights
   pm.callbackQuery(/^ccancel:(.+)$/, async (ctx) => {
     const lang = L(ctx);
     try {
-      const order = await service.transition(ctx.match[1], STATUS.CANCELLED, {}, (o) => {
-        customerGuard(ctx.from.id)(o);
-        if (!CUSTOMER_CANCELLABLE.has(o.status)) {
-          const e = new Error('late');
-          e.cantCancel = true;
-          throw e;
-        }
+      await checkout.cancelByCustomer({
+        orderId: ctx.match[1],
+        customerId: ctx.from.id,
+        onCancelled: async (order) => {
+          await ctx.answerCallbackQuery();
+          await appendLine(ctx, `${statusLabel(lang, STATUS.CANCELLED)} · ${order.id}`);
+        },
       });
-      await ctx.answerCallbackQuery();
-      await appendLine(ctx, `${statusLabel(lang, STATUS.CANCELLED)} · ${order.id}`);
-      const merchant = await store.getMerchant(order.merchantId);
-      if (merchant) await notify.toMerchant(merchant, 'mCancelled', { id: order.id });
-      await notify.dispatch(`❌ ${order.id} cancelled by customer`);
-      void tracker.close(order, th(order.customerLang, 'orderCancelled', { id: order.id }));
     } catch (err) {
-      if (err.cantCancel) {
+      if (err.code === 'TOO_LATE') {
         return ctx.answerCallbackQuery({ text: t(lang, 'cantCancel', { phone: config.supportPhone }), show_alert: true });
       }
       return replyError(ctx, err, lang);

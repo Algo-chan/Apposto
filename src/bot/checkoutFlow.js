@@ -3,7 +3,8 @@
 // Chat-only replies (the bottom menu, "📨 id" under the summary) stay in customer.js.
 import { InlineKeyboard } from 'grammy';
 import { t } from '../i18n.js';
-import { summarizeCart, formatMoney } from '../core/orders.js';
+import { summarizeCart, formatMoney, STATUS, CUSTOMER_CANCELLABLE, OrderError } from '../core/orders.js';
+import { customerGuard } from '../core/orderService.js';
 import { itemLines, foodText, distanceText } from './ui.js';
 import { th } from './html.js';
 
@@ -92,5 +93,23 @@ export function createCheckoutFlow({ store, service, notify, tracker }) {
     return order;
   }
 
-  return { placeAndNotify, submitRefAndNotify };
+  /**
+   * The customer cancels while the shop has not confirmed the payment (PLACED / ACCEPTED).
+   * Throws OrderError TOO_LATE after that, FORBIDDEN for someone else's order, NOT_FOUND.
+   * onCancelled(order): the caller's own reply, before the shop is told.
+   */
+  async function cancelByCustomer({ orderId, customerId, onCancelled }) {
+    const order = await service.transition(orderId, STATUS.CANCELLED, {}, (o) => {
+      customerGuard(customerId)(o);
+      if (!CUSTOMER_CANCELLABLE.has(o.status)) throw new OrderError('TOO_LATE', `Order is ${o.status}`);
+    });
+    if (onCancelled) await onCancelled(order);
+    const merchant = await store.getMerchant(order.merchantId);
+    if (merchant) await notify.toMerchant(merchant, 'mCancelled', { id: order.id });
+    await notify.dispatch(`❌ ${order.id} cancelled by customer`);
+    void tracker.close(order, th(order.customerLang, 'orderCancelled', { id: order.id }));
+    return order;
+  }
+
+  return { placeAndNotify, submitRefAndNotify, cancelByCustomer };
 }

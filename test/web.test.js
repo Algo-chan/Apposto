@@ -211,3 +211,21 @@ test('/app/payment-guide.png is served when the file exists', async () => {
     await close();
   }
 });
+
+test('security headers: the page gets a content policy, every answer gets nosniff and no referrer', async () => {
+  const { base, close } = await appServer();
+  try {
+    const page = await fetch(`${base}/app`);
+    const csp = page.headers.get('content-security-policy');
+    assert.match(csp, /default-src 'self'/);
+    assert.match(csp, /script-src 'self' https:\/\/telegram\.org/);
+    assert.match(csp, /frame-ancestors 'self' https:\/\/web\.telegram\.org/);
+    assert.match(csp, /connect-src 'self'/);
+    for (const r of [page, await fetch(`${base}/app/app.js`), await fetch(`${base}/api/shops`), await fetch(`${base}/nope`)]) {
+      assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(r.headers.get('referrer-policy'), 'no-referrer');
+    }
+  } finally {
+    await close();
+  }
+});

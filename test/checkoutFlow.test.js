@@ -77,3 +77,23 @@ test('submitRefAndNotify rejects a ref already used by another order, and anothe
     (e) => e instanceof OrderError && e.code === 'FORBIDDEN'
   );
 });
+
+test('cancelByCustomer cancels a waiting order and tells the shop and the group', async () => {
+  const h = setup();
+  const order = await appOrder(h);
+  const cancelled = await h.checkout.cancelByCustomer({ orderId: order.id, customerId: CUSTOMER2 });
+  assert.equal(cancelled.status, 'CANCELLED');
+  assert.match(h.lastTo(MERCHANT).text, new RegExp(order.id));
+  assert.match(h.lastTo(GROUP).text, new RegExp(`❌ ${order.id} cancelled by customer`));
+});
+
+test('cancelByCustomer refuses once payment is confirmed, and refuses other customers', async () => {
+  const h = setup();
+  const order = await appOrder(h);
+  await assert.rejects(h.checkout.cancelByCustomer({ orderId: order.id, customerId: CUSTOMER }), (e) => e.code === 'FORBIDDEN');
+  await h.tap(MERCHANT, `macc:${order.id}`);
+  await h.checkout.submitRefAndNotify({ orderId: order.id, customerId: CUSTOMER2, ref: 'CK12AB34CD' });
+  await h.tap(MERCHANT, `mpay:${order.id}`);
+  await assert.rejects(h.checkout.cancelByCustomer({ orderId: order.id, customerId: CUSTOMER2 }), (e) => e.code === 'TOO_LATE');
+  assert.equal((await h.order(order.id)).status, 'CONFIRMED');
+});
