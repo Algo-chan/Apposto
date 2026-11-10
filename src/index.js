@@ -9,6 +9,8 @@ import { createSheetsStore } from './storage/sheetsStore.js';
 import { createHealthHandler, superviseRunner, startKeepAlive } from './runtime.js';
 import { createPhotoProxy } from './web/photoProxy.js';
 import { createHttpHandler } from './web/httpHandler.js';
+import { createWebApi } from './web/api.js';
+import { loadStaticFiles } from './web/staticFiles.js';
 
 dotenv.config({ quiet: true });
 if (process.argv.includes('--demo')) process.env.STORAGE = 'memory';
@@ -42,19 +44,22 @@ if (config.storage === 'memory') {
   console.log('📗 Connected to Google Sheets');
 }
 
-const { bot } = createBot({ config, store });
+const { bot, checkout, insights } = createBot({ config, store });
 let runner = null;
 let stopping = false;
 
 // Hosting platforms (Render, Railway, Fly...) set PORT and expect the process to bind it.
-// The bot itself uses long polling; the server answers the health check and serves the shop photos.
+// The bot itself uses long polling; the server answers the health check and serves the mini app
+// (its page, API and the shop photos).
 // Locally PORT is unset, so nothing changes.
 const port = Number(process.env.PORT);
 let healthServer = null;
 if (Number.isInteger(port) && port > 0) {
   const health = createHealthHandler({ isRunning: () => !!runner && runner.isRunning() });
   const photos = createPhotoProxy({ api: bot.api, botToken: config.botToken, store });
-  healthServer = http.createServer(createHttpHandler({ health, photos }));
+  const api = createWebApi({ store, config, insights, checkout });
+  const staticFiles = loadStaticFiles('webapp', { '/app/payment-guide.png': config.paymentGuidePath });
+  healthServer = http.createServer(createHttpHandler({ health, photos, api, staticFiles, botToken: config.botToken }));
   healthServer.listen(port, '0.0.0.0', () => {
     console.log(`❤️  Health server listening on 0.0.0.0:${port}`);
   });

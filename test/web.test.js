@@ -109,3 +109,105 @@ test('http handler: health, a cached photo with its headers, bad and unknown ids
     await close();
   }
 });
+
+// ---------- mini app: static files and the authenticated API ----------
+import fs from 'node:fs';
+import os from 'node:os';
+import nodePath from 'node:path';
+import { loadStaticFiles } from '../src/web/staticFiles.js';
+import { signInitData } from '../src/web/initData.js';
+
+function appDir() {
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'webapp-'));
+  fs.writeFileSync(nodePath.join(dir, 'index.html'), '<!doctype html><title>Shop</title>');
+  fs.writeFileSync(nodePath.join(dir, 'app.js'), 'console.log(1)');
+  fs.writeFileSync(nodePath.join(dir, 'app.css'), 'body{}');
+  const guide = nodePath.join(dir, '..', `guide-${process.pid}.png`);
+  fs.writeFileSync(guide, 'png');
+  return { dir, guide };
+}
+
+async function appServer() {
+  const { dir, guide } = appDir();
+  const seen = [];
+  const api = {
+    async handle(method, path, { user, body }) {
+      seen.push({ method, path, user, body });
+      return { status: 200, body: { ok: true, user: user.id } };
+    },
+  };
+  const staticFiles = loadStaticFiles(dir, { '/app/payment-guide.png': guide, '/app/missing.png': nodePath.join(dir, 'nope.png') });
+  const handler = createHttpHandler({ health: createHealthHandler({ isRunning: () => true }), photos: { get: async () => null }, api, staticFiles, botToken: '1:test' });
+  return { ...(await serve(handler)), seen };
+}
+
+const initData = (token = '1:test') =>
+  signInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 100, first_name: 'A' }) }, token);
+
+test('/api needs signed initData: none or a wrong bot gives 401, a good one reaches the API', async () => {
+  const { base, close, seen } = await appServer();
+  try {
+    let r = await fetch(`${base}/api/shops`);
+    assert.equal(r.status, 401);
+    assert.deepEqual(await r.json(), { error: 'UNAUTHORIZED' });
+    r = await fetch(`${base}/api/shops`, { headers: { Authorization: `tma ${initData('2:other')}` } });
+    assert.equal(r.status, 401);
+    r = await fetch(`${base}/api/shops?x=1`, { headers: { Authorization: `tma ${initData()}` } });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await r.json(), { ok: true, user: '100' });
+    assert.deepEqual(seen.map((s) => [s.method, s.path]), [['GET', '/api/shops']]);
+    r = await fetch(`${base}/api/orders`, { method: 'POST', headers: { Authorization: `tma ${initData()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ a: 1 }) });
+    assert.equal(r.status, 200);
+    assert.deepEqual(seen.at(-1).body, { a: 1 });
+  } finally {
+    await close();
+  }
+});
+
+test('/api POST: over 16 KB is 413, bad JSON is 400 BAD_REQUEST', async () => {
+  const { base, close } = await appServer();
+  const headers = { Authorization: `tma ${initData()}`, 'Content-Type': 'application/json' };
+  try {
+    let r = await fetch(`${base}/api/orders`, { method: 'POST', headers, body: JSON.stringify({ x: 'a'.repeat(17 * 1024) }) });
+    assert.equal(r.status, 413);
+    r = await fetch(`${base}/api/orders`, { method: 'POST', headers, body: '{nope' });
+    assert.equal(r.status, 400);
+    assert.deepEqual(await r.json(), { error: 'BAD_REQUEST' });
+  } finally {
+    await close();
+  }
+});
+
+test('/app serves the page and its files, nothing outside them', async () => {
+  const { base, close } = await appServer();
+  try {
+    for (const p of ['/app', '/app/', '/app/index.html']) {
+      const r = await fetch(`${base}${p}`);
+      assert.equal(r.status, 200, p);
+      assert.match(r.headers.get('content-type'), /text\/html/);
+      assert.equal(r.headers.get('cache-control'), 'no-cache');
+      assert.match(await r.text(), /<title>Shop<\/title>/);
+    }
+    const js = await fetch(`${base}/app/app.js`);
+    assert.match(js.headers.get('content-type'), /text\/javascript/);
+    assert.equal(js.headers.get('cache-control'), 'public, max-age=300');
+    assert.match((await fetch(`${base}/app/app.css`)).headers.get('content-type'), /text\/css/);
+    for (const p of ['/app/../package.json', '/app/%2e%2e/package.json', '/app/nope.js', '/app/missing.png']) {
+      assert.equal((await fetch(`${base}${p}`)).status, 404, p);
+    }
+  } finally {
+    await close();
+  }
+});
+
+test('/app/payment-guide.png is served when the file exists', async () => {
+  const { base, close } = await appServer();
+  try {
+    const r = await fetch(`${base}/app/payment-guide.png`);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('content-type'), 'image/png');
+  } finally {
+    await close();
+  }
+});
