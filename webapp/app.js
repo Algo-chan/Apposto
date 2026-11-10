@@ -1,4 +1,4 @@
-// The customer mini app: shops -> menu -> basket & details -> confirm -> order status.
+// The customer mini app: shops -> menu -> checkout -> confirm -> order tracking.
 // The server checks everything again (prices, fees, who you are); this page only shows it.
 import { createBasket, add, remove, count, foodTotal } from '/app/basket.js';
 import { createApi } from '/app/net.js';
@@ -6,7 +6,7 @@ import { tr } from '/app/strings.js';
 
 const tg = window.Telegram?.WebApp;
 const inTelegram = Boolean(tg?.initData);
-// Telegram's own Back button and vibration exist from app version 6.1; older apps get the page's Back link.
+// Telegram's own Back button and vibration exist from app version 6.1; older apps get the page's Back.
 const nativeBack = inTelegram && Boolean(tg.isVersionAtLeast?.('6.1'));
 const haptic = nativeBack ? tg.HapticFeedback : null;
 const initData = tg?.initData || window.__DEV_INIT_DATA__ || '';
@@ -15,13 +15,16 @@ const SAVE_KEY = 'shop.v1';
 const POLL_MS = 5000;
 const FINAL = new Set(['DELIVERED', 'REJECTED', 'CANCELLED']);
 const STAGES = ['PLACED', 'ACCEPTED', 'PAYMENT_SUBMITTED', 'CONFIRMED', 'READY', 'PICKED_UP', 'DELIVERED'];
+const STATUS_EMOJI = { PLACED: '⏳', ACCEPTED: '💳', PAYMENT_SUBMITTED: '🔎', CONFIRMED: '👨‍🍳', READY: '🛍️', PICKED_UP: '🚲', DELIVERED: '🎉', REJECTED: '😔', CANCELLED: '✖️' };
+const GREEN = '#128a43';
+const BG = '#f5f6f8';
 
 const state = {
   lang: 'en',
   me: null,
   shops: [],
-  shop: null, // { id, names, banner }
-  items: [], // current shop's menu
+  shop: null, // the open shop's card: { id, names, banner, eta, deliveryFeeFrom, rating }
+  items: [], // its menu
   basket: createBasket(),
   form: { landmark: '', phone: '', lat: null, lng: null, loc: 'none' }, // loc: none | busy | set | skipped | failed
   quote: null,
@@ -32,9 +35,18 @@ const state = {
   screen: null,
   error: '',
   busy: false,
+  shopQuery: '',
+  menuQuery: '',
 };
 
-const api = createApi({ initData, onRetry: () => showConnecting() });
+let waking = false;
+const api = createApi({
+  initData,
+  onRetry: () => {
+    waking = true;
+    showLoading();
+  },
+});
 const T = (key, params) => tr(state.lang, key, params);
 const money = (n) => `${Math.round(n || 0).toLocaleString('en-US')} Br`;
 const nameOf = (rec) => rec?.names?.[state.lang] || rec?.names?.en || '';
@@ -81,8 +93,8 @@ function restore() {
 }
 
 // ---------- navigation ----------
-function go(screen, { replace = false } = {}) {
-  if (state.screen && !replace) state.stack.push(state.screen);
+function go(screen) {
+  if (state.screen) state.stack.push(state.screen);
   state.screen = screen;
   state.error = '';
   render();
@@ -91,26 +103,31 @@ function go(screen, { replace = false } = {}) {
 function back() {
   const prev = state.stack.pop();
   if (!prev) return;
+  stopPolling();
   state.screen = prev;
   state.error = '';
   render();
 }
 function home() {
+  stopPolling();
   state.stack = [];
   state.screen = null;
   loadShops();
 }
 if (nativeBack) tg.BackButton.onClick(back);
 
-function frame(title, ...content) {
-  const kids = [];
-  if (state.stack.length && !nativeBack) kids.push(h('button', { class: 'back', onclick: back }, '‹ Back'));
-  if (title) kids.push(h('h1', {}, title));
-  if (state.error) kids.push(h('p', { class: 'error', role: 'alert' }, state.error));
-  return [...kids, ...content];
+/** The page's own round Back button (when Telegram has none). */
+function backButton() {
+  return state.stack.length && !nativeBack ? h('button', { class: 'round-back', 'aria-label': 'Back', onclick: back }, '‹') : null;
 }
-function bar(label, onclick, { disabled = false } = {}) {
-  return h('div', { class: 'bar' }, h('button', { onclick, disabled: disabled || state.busy }, state.busy ? T('sending') : label));
+function pageHead(title) {
+  return h('div', { class: 'page-head' }, backButton(), h('h1', {}, title));
+}
+function errorBox() {
+  return state.error ? h('p', { class: 'error-box', role: 'alert' }, state.error) : null;
+}
+function bar(content, onclick, { disabled = false, split = false } = {}) {
+  return h('div', { class: 'bar' }, h('button', { class: split ? 'split' : '', onclick, disabled: disabled || state.busy }, state.busy ? T('sending') : content));
 }
 
 function render() {
@@ -119,18 +136,20 @@ function render() {
     else tg.BackButton.hide();
   }
   const view = SCREENS[state.screen]?.() ?? [];
-  root.replaceChildren(...view.filter(Boolean));
+  root.replaceChildren(...view.flat().filter(Boolean));
 }
 
-function showConnecting() {
-  root.replaceChildren(h('div', { class: 'center' }, h('div', { class: 'spinner' }), h('p', {}, T('connecting'))));
+function showLoading() {
+  root.replaceChildren(
+    h('div', { class: 'skeleton' }, h('div', { class: 'sk head' }), h('div', { class: 'sk card' }), h('div', { class: 'sk card' }), waking ? h('p', { class: 'waking' }, T('connecting')) : null)
+  );
 }
 function showFatal(code, retry) {
   const kids = [h('p', {}, T(`err_${code}`))];
-  if (retry) kids.push(h('button', { class: 'btn-secondary', onclick: retry }, T('retry')));
+  if (retry) kids.push(h('div', { style: 'margin-top:16px' }, h('button', { class: 'btn primary', onclick: retry }, T('retry'))));
   root.replaceChildren(h('div', { class: 'center' }, ...kids));
 }
-/** An API answer that failed: the message for it (and the 401 screen). */
+/** An API answer that failed: its error code (and the 401 screen). */
 function failed(res) {
   const code = res.body?.error || (res.status === 0 ? 'NETWORK' : 'ERROR');
   if (code === 'UNAUTHORIZED') showFatal('UNAUTHORIZED');
@@ -139,12 +158,21 @@ function failed(res) {
 
 // ---------- start ----------
 async function start() {
+  if (nativeBack) {
+    try {
+      tg.setHeaderColor(GREEN);
+      tg.setBackgroundColor(BG);
+      if (tg.isVersionAtLeast('7.10')) tg.setBottomBarColor('#ffffff');
+    } catch {
+      /* colours are a nicety */
+    }
+  }
   tg?.ready();
   tg?.expand();
-  if (inTelegram) document.documentElement.classList.add('tg');
   restore();
-  showConnecting();
+  showLoading();
   const me = await api('/api/me');
+  waking = false;
   if (!me.ok) {
     const code = failed(me);
     if (code !== 'UNAUTHORIZED') showFatal(code, start);
@@ -169,8 +197,9 @@ async function chooseLang(lang) {
 }
 
 async function loadShops() {
-  showConnecting();
+  showLoading();
   const res = await api('/api/shops');
+  waking = false;
   if (!res.ok) {
     const code = failed(res);
     if (code !== 'UNAUTHORIZED') showFatal(code, loadShops);
@@ -188,8 +217,9 @@ async function loadShops() {
 }
 
 async function openShop(shop) {
-  showConnecting();
+  showLoading();
   const res = await api(`/api/shops/${encodeURIComponent(shop.id)}/menu`);
+  waking = false;
   if (!res.ok) {
     const code = failed(res);
     if (code === 'UNAUTHORIZED') return;
@@ -198,6 +228,7 @@ async function openShop(shop) {
   }
   state.shop = res.body.shop;
   state.items = res.body.items;
+  state.menuQuery = '';
   pruneBasket();
   go('menu');
 }
@@ -211,64 +242,14 @@ function pruneBasket() {
   save();
 }
 
-// ---------- screens ----------
-const SCREENS = {
-  lang: () => [
-    h('h1', {}, '🌍'),
-    ...[['om', 'Afaan Oromoo'], ['am', 'አማርኛ'], ['en', 'English']].map(([l, label]) =>
-      h('button', { class: 'lang', onclick: () => chooseLang(l) }, label)
-    ),
-    h('p', { class: 'hint center' }, `${tr('om', 'chooseLang')} · ${tr('am', 'chooseLang')} · ${tr('en', 'chooseLang')}`),
-  ],
-
-  shops: () => {
-    const kids = [];
-    if (state.order) {
-      kids.push(
-        h('button', { class: 'strip', onclick: () => openStatus(state.order.id) }, `${T('openOrder', { id: state.order.id, status: T(`st_${state.order.status}`) })} ›`)
-      );
-    }
-    if (state.shops.length === 0) kids.push(h('p', { class: 'center hint' }, T('noShops')));
-    for (const s of state.shops) {
-      kids.push(
-        h(
-          'button',
-          { class: 'shop', onclick: () => openShop(s) },
-          bannerEl(s),
-          h('div', { class: 'row' }, h('span', { class: 'name' }, nameOf(s)), Number.isFinite(s.prepMin) ? h('span', { class: 'hint' }, T('prepTime', { min: s.prepMin })) : null)
-        )
-      );
-    }
-    const n = count(state.basket);
-    const basketBar = n && state.basket.merchantId && state.shops.some((s) => s.id === state.basket.merchantId)
-      ? bar(viewBasketLabel(), () => openShop(state.shops.find((s) => s.id === state.basket.merchantId)))
-      : null;
-    return [...frame(T('shopsTitle'), ...kids), basketBar];
-  },
-
-  menu: () => {
-    const kids = [h('div', { class: 'hero' }, bannerEl(state.shop))];
-    if (state.items.length === 0) kids.push(h('p', { class: 'center hint' }, T('menuEmpty')));
-    kids.push(h('div', { class: 'grid' }, state.items.map(itemCard)));
-    const inThisShop = state.basket.merchantId === state.shop.id;
-    const show = inThisShop && (count(state.basket) > 0 || state.basket.custom);
-    return [...frame(nameOf(state.shop), ...kids), show ? bar(viewBasketLabel(), openBasket) : null];
-  },
-
-  basket: () => basketScreen(),
-  confirm: () => confirmScreen(),
-  status: () => statusScreen(),
-};
-
+// ---------- pieces ----------
 function bannerEl(shop) {
-  if (shop?.banner) {
-    const img = h('img', { class: 'banner', src: shop.banner, alt: '', loading: 'lazy' });
-    img.addEventListener('error', () => img.replaceWith(h('div', { class: 'banner-fallback' }, nameOf(shop))));
-    return img;
-  }
-  return h('div', { class: 'banner-fallback' }, nameOf(shop));
+  const fallback = () => h('div', { class: 'banner-fallback' }, nameOf(shop));
+  if (!shop?.banner) return fallback();
+  const img = h('img', { class: 'banner', src: shop.banner, alt: '', loading: 'lazy' });
+  img.addEventListener('error', () => img.replaceWith(fallback()));
+  return img;
 }
-
 function photoEl(item) {
   const fallback = () => h('div', { class: 'photo-fallback', 'aria-hidden': 'true' }, (nameOf(item)[0] || '•').toUpperCase());
   if (!item.photo) return fallback();
@@ -276,7 +257,21 @@ function photoEl(item) {
   img.addEventListener('error', () => img.replaceWith(fallback()));
   return img;
 }
-
+function ratingEl(rating) {
+  return rating ? h('span', { class: 'rating' }, `★ ${rating.avg.toFixed(1)}`) : h('span', { class: 'badge-new' }, T('newShop'));
+}
+function etaText(eta) {
+  return eta ? T('etaShort', eta) : '';
+}
+function itemsText(n) {
+  return n === 1 ? T('itemsOne') : T('itemsMany', { n });
+}
+function greeting() {
+  const hour = new Date().getHours();
+  const key = hour < 12 ? 'greetMorning' : hour < 17 ? 'greetAfternoon' : 'greetEvening';
+  const name = state.me?.firstName || '';
+  return name ? T(key, { name }) : T(key, { name: '' }).replace(/[,،፣]\s*👋/, ' 👋');
+}
 function stepper(itemId, qty) {
   return h(
     'div',
@@ -286,20 +281,152 @@ function stepper(itemId, qty) {
     h('button', { 'aria-label': '+', onclick: () => change(itemId, +1) }, '+')
   );
 }
+function cardTitle(icon, text) {
+  return h('div', { class: 'card-title' }, h('span', { class: 'ic', 'aria-hidden': 'true' }, icon), text);
+}
+function matches(rec, query) {
+  const q = query.trim().toLowerCase();
+  return !q || Object.values(rec.names || {}).some((n) => String(n).toLowerCase().includes(q));
+}
 
-function itemCard(item) {
+// ---------- screens ----------
+const SCREENS = {
+  lang: () => [
+    h(
+      'div',
+      { class: 'welcome' },
+      h('img', { src: '/app/logo.png', alt: '' }),
+      h('h1', {}, state.me?.brand || ''),
+      h('div', { class: 'langs' }, [['om', 'Afaan Oromoo'], ['am', 'አማርኛ'], ['en', 'English']].map(([l, label]) => h('button', { class: 'lang', onclick: () => chooseLang(l) }, label))),
+      h('p', { class: 'hint' }, `${tr('om', 'chooseLang')} · ${tr('am', 'chooseLang')} · ${tr('en', 'chooseLang')}`)
+    ),
+  ],
+  shops: () => shopsScreen(),
+  menu: () => menuScreen(),
+  basket: () => basketScreen(),
+  confirm: () => confirmScreen(),
+  status: () => statusScreen(),
+};
+
+function shopList() {
+  const list = state.shops.filter((s) => matches(s, state.shopQuery));
+  return h(
+    'div',
+    { class: 'shops', id: 'shop-list' },
+    list.length ? list.map(shopCard) : h('p', { class: 'empty' }, state.shops.length ? T('noResults') : T('noShops'))
+  );
+}
+
+function shopsScreen() {
+  const search = h('input', { type: 'search', placeholder: T('searchShops'), 'aria-label': T('searchShops') });
+  search.value = state.shopQuery;
+  search.addEventListener('input', () => {
+    state.shopQuery = search.value;
+    document.getElementById('shop-list')?.replaceWith(shopList());
+    const c = document.getElementById('shop-count');
+    if (c) c.textContent = String(state.shops.filter((s) => matches(s, state.shopQuery)).length);
+  });
+
+  const head = h(
+    'header',
+    { class: 'hero-head' },
+    h('div', { class: 'brand-row' }, h('img', { src: '/app/logo.png', alt: '' }), h('div', {}, h('div', { class: 'brand' }, state.me?.brand || ''), h('div', { class: 'where' }, `📍 ${T('deliveringIn')}`))),
+    h('div', { class: 'greet' }, greeting()),
+    h('p', { class: 'greet-sub' }, T('hungryLine')),
+    h('label', { class: 'search' }, h('span', { 'aria-hidden': 'true' }, '🔍'), search)
+  );
+  const live = state.order
+    ? h(
+        'button',
+        { class: 'live-order', onclick: () => openStatus(state.order.id) },
+        h('span', { class: 'pulse', 'aria-hidden': 'true' }),
+        h('span', { class: 'txt' }, h('b', {}, T(`st_${state.order.status}`)), h('span', { class: 'muted small' }, `${state.order.shopName} · ${state.order.id}`)),
+        h('span', { class: 'go' }, `${T('track')} ›`)
+      )
+    : null;
+  const chips = h('div', { class: 'chips' }, h('span', { class: 'chip' }, T('trustBike')), h('span', { class: 'chip' }, T('trustPay')), h('span', { class: 'chip' }, T('trustLocal')));
+
+  const n = count(state.basket);
+  const basketShop = state.shops.find((s) => s.id === state.basket.merchantId);
+  const basketBar = n && basketShop ? bar(barContent(n), () => openShop(basketShop), { split: true }) : null;
+  return [
+    head,
+    errorBox(),
+    live,
+    chips,
+    h('h2', { class: 'section-title' }, T('allShops'), h('span', { class: 'count', id: 'shop-count' }, String(state.shops.filter((s) => matches(s, state.shopQuery)).length))),
+    shopList(),
+    basketBar,
+  ];
+}
+
+function shopCard(s) {
+  return h(
+    'button',
+    { class: 'shop', onclick: () => openShop(s) },
+    h('div', { class: 'media' }, bannerEl(s), s.eta ? h('span', { class: 'pill' }, `⏱ ${etaText(s.eta)}`) : null),
+    h(
+      'div',
+      { class: 'info' },
+      h('div', { class: 'name' }, nameOf(s)),
+      h('div', { class: 'meta' }, ratingEl(s.rating), h('span', { class: 'dot' }), h('span', {}, `🚲 ${T('deliveryFrom', { fee: money(s.deliveryFeeFrom) })}`))
+    )
+  );
+}
+
+/** Basket bar: count + food total on the left (when the menu is known), "View basket ›" on the right. */
+function barContent(n) {
+  const known = state.shop?.id === state.basket.merchantId;
+  const total = known ? foodTotal(state.basket, itemsById()) : null;
+  return [
+    h('span', { class: 'left' }, h('span', {}, h('span', { class: 'badge', 'aria-label': itemsText(n) }, String(n)), total != null && n ? money(total) : itemsText(n))),
+    h('span', {}, `${T('viewBasketShort')} ›`),
+  ];
+}
+
+function itemList() {
+  const items = state.items.filter((i) => matches(i, state.menuQuery));
+  if (!state.items.length) return h('p', { class: 'empty', id: 'item-list' }, T('menuEmpty'));
+  if (!items.length) return h('p', { class: 'empty', id: 'item-list' }, T('noResults'));
+  return h('div', { class: 'items', id: 'item-list' }, items.map(itemRow));
+}
+
+function menuScreen() {
+  const s = state.shop;
+  const search = h('input', { type: 'search', placeholder: T('searchMenu'), 'aria-label': T('searchMenu') });
+  search.value = state.menuQuery;
+  search.addEventListener('input', () => {
+    state.menuQuery = search.value;
+    document.getElementById('item-list')?.replaceWith(itemList());
+  });
+
+  const inThisShop = state.basket.merchantId === s.id;
+  const n = inThisShop ? count(state.basket) : 0;
+  const show = inThisShop && (n > 0 || state.basket.custom);
+  return [
+    h('div', { class: 'shop-hero' }, bannerEl(s), backButton(), h('h1', {}, nameOf(s))),
+    h(
+      'div',
+      { class: 'info-card' },
+      h('div', {}, h('b', {}, s.rating ? `★ ${s.rating.avg.toFixed(1)}` : T('newShop')), h('span', {}, s.rating ? `(${s.rating.count})` : '⭐')),
+      h('div', {}, h('b', {}, etaText(s.eta) || '—'), h('span', {}, '⏱')),
+      h('div', {}, h('b', {}, money(s.deliveryFeeFrom)), h('span', {}, `🚲 ${T('deliveryFee')}`))
+    ),
+    errorBox(),
+    state.items.length > 5 ? h('label', { class: 'menu-search' }, h('span', { 'aria-hidden': 'true' }, '🔍'), search) : null,
+    h('h2', { class: 'section-title' }, T('menuTitle'), h('span', { class: 'count' }, String(state.items.length))),
+    itemList(),
+    show ? bar(barContent(n), openBasket, { split: true }) : null,
+  ];
+}
+
+function itemRow(item) {
   const qty = state.basket.merchantId === state.shop.id ? state.basket.items[item.id] || 0 : 0;
   return h(
     'div',
     { class: 'item' },
-    photoEl(item),
-    h(
-      'div',
-      { class: 'body' },
-      h('div', { class: 'name' }, nameOf(item)),
-      h('div', { class: 'price' }, money(item.price)),
-      h('div', { class: 'controls' }, qty ? stepper(item.id, qty) : h('button', { class: 'btn-add', onclick: () => change(item.id, +1) }, `+ ${T('add')}`))
-    )
+    h('div', { class: 'text' }, h('div', { class: 'name' }, nameOf(item)), h('div', { class: 'price' }, money(item.price))),
+    h('div', { class: 'pic' }, photoEl(item), qty ? stepper(item.id, qty) : h('button', { class: 'add', onclick: () => change(item.id, +1) }, T('add')))
   );
 }
 
@@ -313,7 +440,7 @@ function change(itemId, delta) {
         save();
         render();
       };
-      if (tg?.showPopup && inTelegram) {
+      if (nativeBack && tg.showPopup) {
         tg.showPopup({ message: T('switchShop'), buttons: [{ id: 'yes', type: 'destructive', text: T('switchYes') }, { id: 'no', type: 'cancel' }] }, (id) => id === 'yes' && ok());
       } else if (window.confirm(T('switchShop'))) ok();
       return;
@@ -330,17 +457,14 @@ function change(itemId, delta) {
 function itemsById() {
   return new Map(state.items.map((i) => [i.id, i]));
 }
-function viewBasketLabel() {
-  const food = foodTotal(state.basket, itemsById());
-  return T('viewBasket', { n: count(state.basket), total: money(food) });
-}
 
-// ---------- basket & details ----------
-/** The basket screen; a location chosen earlier (saved in this tab) gets its fee again. */
+// ---------- checkout ----------
+/** The checkout screen; a location chosen earlier (saved in this tab) gets its fee again. */
 function openBasket() {
   go('basket');
   if (!state.quote && (state.form.loc === 'set' || state.form.loc === 'skipped')) requestQuote();
 }
+
 async function requestQuote() {
   const body = { merchantId: state.shop.id };
   if (state.form.loc === 'set') Object.assign(body, { lat: state.form.lat, lng: state.form.lng });
@@ -376,7 +500,6 @@ function telegramLocation() {
     else lm.init(ask);
   });
 }
-
 async function useLocation() {
   state.form.loc = 'busy';
   render();
@@ -391,7 +514,6 @@ async function skipLocation() {
   save();
   await requestQuote();
 }
-
 function sharePhone() {
   if (!tg?.requestContact || !tg.isVersionAtLeast?.('6.9')) return;
   tg.requestContact((shared, res) => {
@@ -403,16 +525,31 @@ function sharePhone() {
     }
   });
 }
-
 function field(labelText, input) {
   return [h('label', { for: input.id }, labelText), input];
+}
+
+/** Bill: item total, delivery, service, total; then who gets what (shop by Telebirr/CBE, rider in cash). */
+function billCard(q, food, hasItems, custom) {
+  const foodShown = hasItems ? `${money(food)}${custom ? ` ${T('plusRequest')}` : ''}` : T('priceByShop');
+  const cash = q.deliveryFee + q.serviceFee;
+  return h(
+    'div',
+    { class: 'card' },
+    cardTitle('🧾', T('billSummary')),
+    h('div', { class: 'line' }, h('span', { class: 'what' }, T('itemTotal')), h('span', {}, foodShown)),
+    h('div', { class: 'line' }, h('span', { class: 'what' }, T('deliveryFee'), Number.isFinite(q.distanceKm) ? h('small', {}, `~${q.distanceKm} km`) : null), h('span', {}, money(q.deliveryFee))),
+    h('div', { class: 'line' }, h('span', { class: 'what' }, T('serviceFee')), h('span', {}, money(q.serviceFee))),
+    h('div', { class: 'line total-line' }, h('span', {}, T('toPay')), h('span', {}, hasItems ? money(food + cash) : `${money(cash)} +`)),
+    h('div', { class: 'split-pay' }, h('div', {}, h('span', {}, `🏪 ${T('payShop')}`), h('span', {}, hasItems ? money(food) : '—')), h('div', {}, h('span', {}, `🚲 ${T('cashToRider')}`), h('span', {}, money(cash))))
+  );
 }
 
 function basketScreen() {
   const byId = itemsById();
   const lines = Object.entries(state.basket.items).map(([id, qty]) => {
     const item = byId.get(id);
-    return h('div', { class: 'line' }, h('span', {}, `${nameOf(item)} · ${money(item.price * qty)}`), stepper(id, qty));
+    return h('div', { class: 'line' }, h('span', { class: 'what' }, nameOf(item), h('small', {}, money(item.price * qty))), stepper(id, qty));
   });
 
   const custom = h('textarea', { id: 'custom', maxlength: 300, placeholder: T('specialRequestHint') });
@@ -420,15 +557,16 @@ function basketScreen() {
   custom.addEventListener('input', () => {
     state.basket = { ...state.basket, custom: custom.value };
     save();
+    updateContinue();
   });
 
   const f = state.form;
-  const locLine = {
+  const locNote = {
     none: null,
-    busy: h('p', { class: 'hint' }, T('locating')),
-    set: h('p', { class: 'ok' }, Number.isFinite(state.quote?.distanceKm) ? T('locationSet', { km: state.quote.distanceKm }) : T('locationSetPlain')),
-    skipped: h('p', { class: 'hint' }, T('locationSkipped')),
-    failed: h('p', { class: 'error' }, T('locationFailed')),
+    busy: h('p', { class: 'note muted' }, T('locating')),
+    set: h('p', { class: 'note ok' }, Number.isFinite(state.quote?.distanceKm) ? T('locationSet', { km: state.quote.distanceKm }) : T('locationSetPlain')),
+    skipped: h('p', { class: 'note muted' }, T('locationSkipped')),
+    failed: h('p', { class: 'note err' }, T('locationFailed')),
   }[f.loc];
 
   const landmark = h('input', { id: 'landmark', maxlength: 200, placeholder: T('landmarkHint'), autocomplete: 'off' });
@@ -450,39 +588,36 @@ function basketScreen() {
   const q = state.quote;
   const food = foodTotal(state.basket, byId);
   const hasItems = count(state.basket) > 0;
-  const fees = q
-    ? h(
-        'div',
-        { class: 'panel' },
-        h('div', { class: 'line' }, h('span', {}, T('food')), h('span', {}, hasItems ? money(food) : T('priceByShop'), hasItems && state.basket.custom ? ` ${T('plusRequest')}` : '')),
-        h('div', { class: 'line' }, h('span', {}, T('deliveryFee')), h('span', {}, money(q.deliveryFee))),
-        h('div', { class: 'line' }, h('span', {}, T('serviceFee')), h('span', {}, money(q.serviceFee))),
-        q.outOfRange ? h('p', { class: 'error' }, T('err_OUT_OF_RANGE')) : null
-      )
-    : null;
-
-  const view = frame(
-    T('basketTitle'),
-    h('div', { class: 'panel' }, lines.length ? lines : h('p', { class: 'hint' }, T('err_EMPTY')), field(T('specialRequest'), custom)),
-    h('h2', {}, T('locationTitle')),
-    h(
-      'div',
-      { class: 'panel' },
-      h('div', { class: 'btn-row' }, h('button', { class: 'btn-secondary', onclick: useLocation, disabled: f.loc === 'busy' }, T('useLocation')), h('button', { class: 'btn-secondary', onclick: skipLocation }, T('skipLocation'))),
-      locLine,
-      field(T('landmark'), landmark),
-      field(T('phone'), phone),
-      canShare ? h('button', { class: 'btn-secondary', onclick: sharePhone }, T('sharePhone')) : null
-    ),
-    fees
-  );
   const b = bar(T('continue'), () => {
     if (!detailsReady()) return;
     if (!state.requestId) state.requestId = newRequestId();
     go('confirm');
   }, { disabled: !detailsReady() });
   b.id = 'continue-bar';
-  return [...view, b];
+
+  return [
+    pageHead(T('checkoutTitle')),
+    errorBox(),
+    h('div', { class: 'card' }, cardTitle('🧺', `${T('yourOrder')} · ${nameOf(state.shop)}`), lines.length ? lines : h('p', { class: 'muted' }, T('err_EMPTY')), field(T('specialRequest'), custom)),
+    h(
+      'div',
+      { class: 'card' },
+      cardTitle('📍', T('locationTitle')),
+      h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { class: 'btn primary', onclick: useLocation, disabled: f.loc === 'busy' }, T('useLocation')),
+        h('button', { class: 'btn ghost', onclick: skipLocation }, T('skipLocation'))
+      ),
+      locNote,
+      field(T('landmark'), landmark)
+    ),
+    h('div', { class: 'card' }, cardTitle('📞', T('contactTitle')), field(T('phone'), phone), canShare ? h('div', { style: 'margin-top:8px' }, h('button', { class: 'btn outline', onclick: sharePhone }, T('sharePhone'))) : null),
+    q ? billCard(q, food, hasItems, state.basket.custom.trim()) : null,
+    q?.outOfRange ? h('p', { class: 'error-box' }, T('err_OUT_OF_RANGE')) : null,
+    h('div', { class: 'trust' }, h('span', { 'aria-hidden': 'true' }, '🔒'), h('span', {}, T('trustLine'))),
+    b,
+  ];
 }
 
 function detailsReady() {
@@ -495,7 +630,6 @@ function updateContinue() {
   const btn = document.querySelector('#continue-bar button');
   if (btn) btn.disabled = !detailsReady() || state.busy;
 }
-
 function newRequestId() {
   return crypto.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
@@ -506,24 +640,25 @@ function confirmScreen() {
   const q = state.quote;
   const food = foodTotal(state.basket, byId);
   const hasItems = count(state.basket) > 0;
+  const custom = state.basket.custom.trim();
   const lines = Object.entries(state.basket.items).map(([id, qty]) =>
-    h('div', { class: 'line' }, h('span', {}, `${qty} × ${nameOf(byId.get(id))}`), h('span', {}, money(byId.get(id).price * qty)))
+    h('div', { class: 'line' }, h('span', { class: 'what' }, `${qty} × ${nameOf(byId.get(id))}`), h('span', {}, money(byId.get(id).price * qty)))
   );
-  if (state.basket.custom.trim()) lines.push(h('div', { class: 'line' }, h('span', {}, `✍️ “${state.basket.custom.trim()}”`)));
+  if (custom) lines.push(h('div', { class: 'line' }, h('span', { class: 'what' }, `✍️ “${custom}”`)));
   return [
-    ...frame(
-      T('confirmTitle'),
-      h('div', { class: 'panel' }, h('div', { class: 'line' }, h('b', {}, nameOf(state.shop))), lines),
-      h(
-        'div',
-        { class: 'panel' },
-        h('div', { class: 'line' }, h('span', {}, T('food')), h('span', { class: 'total' }, hasItems ? money(food) : T('priceByShop'), hasItems && state.basket.custom.trim() ? ` ${T('plusRequest')}` : '')),
-        h('p', { class: 'hint' }, T('payShopNote')),
-        h('div', { class: 'line' }, h('span', {}, `${T('deliveryFee')} + ${T('serviceFee')}`), h('span', { class: 'total' }, money(q.deliveryFee + q.serviceFee))),
-        h('p', { class: 'hint' }, T('cashRiderNote', { amount: money(q.deliveryFee + q.serviceFee) }))
-      ),
-      h('div', { class: 'panel' }, h('p', {}, `📍 ${state.form.landmark.trim()}`), h('p', {}, `📞 ${state.form.phone.trim()}`), q.eta ? h('p', { class: 'hint' }, T('eta', q.eta)) : null)
+    pageHead(T('confirmTitle')),
+    errorBox(),
+    h('div', { class: 'card' }, cardTitle('🏪', nameOf(state.shop)), lines),
+    h(
+      'div',
+      { class: 'card' },
+      cardTitle('📍', T('locationTitle')),
+      h('p', {}, state.form.landmark.trim()),
+      h('p', { class: 'muted small', style: 'margin-top:4px' }, `📞 ${state.form.phone.trim()}`),
+      q.eta ? h('p', { class: 'note ok' }, `⏱ ${T('eta', q.eta)}`) : null
     ),
+    billCard(q, food, hasItems, custom),
+    h('div', { class: 'trust' }, h('span', { 'aria-hidden': 'true' }, '🔒'), h('span', {}, T('payShopNote'))),
     bar(T('confirmOrder'), placeOrder),
   ];
 }
@@ -573,12 +708,13 @@ async function placeOrder() {
 async function reloadMenu() {
   const res = await api(`/api/shops/${encodeURIComponent(state.shop.id)}/menu`);
   if (res.ok) {
+    state.shop = res.body.shop;
     state.items = res.body.items;
     pruneBasket();
   }
 }
 
-// ---------- order status ----------
+// ---------- order tracking ----------
 let pollTimer = null;
 function stopPolling() {
   clearTimeout(pollTimer);
@@ -593,7 +729,10 @@ async function poll() {
     if (res.ok) {
       const changed = res.body.status !== state.order?.status;
       state.order = res.body;
-      if (changed) renderKeepingRef();
+      if (changed) {
+        haptic?.notificationOccurred('success');
+        renderKeepingRef();
+      }
       if (FINAL.has(res.body.status)) return;
     }
   }
@@ -606,20 +745,22 @@ document.addEventListener('visibilitychange', () => {
 async function openStatus(orderId, { fresh = false } = {}) {
   stopPolling();
   state.orderId = orderId;
-  showConnecting();
+  showLoading();
   const res = await api(`/api/orders/${encodeURIComponent(orderId)}`);
+  waking = false;
   if (!res.ok) {
     const code = failed(res);
     if (code !== 'UNAUTHORIZED') showFatal(code, () => openStatus(orderId));
     return;
   }
   state.order = res.body;
-  // a new order starts over (nothing to go back to); from the shops strip, Back returns there
+  // a new order starts over (nothing to go back to); from the home card, Back returns there
   if (fresh) state.stack = [];
   else if (state.screen && state.screen !== 'status') state.stack.push(state.screen);
   state.screen = 'status';
   state.error = '';
   render();
+  window.scrollTo(0, 0);
   pollTimer = setTimeout(poll, POLL_MS);
 }
 
@@ -635,14 +776,15 @@ function copyButton(label, value) {
         } catch {
           toast(value);
         }
+        haptic?.impactOccurred('light');
       },
     },
     h('span', {}, label),
-    h('b', {}, value)
+    h('span', {}, h('b', {}, value), h('span', { class: 'cp' }, '⧉'))
   );
 }
 
-/** Re-render the status screen without losing what is typed in the reference box. */
+/** Re-render the tracking screen without losing what is typed in the reference box. */
 function renderKeepingRef() {
   const typed = document.getElementById('ref')?.value;
   render();
@@ -671,58 +813,94 @@ async function sendRef() {
   render();
 }
 
+function timeline(o) {
+  const stage = STAGES.indexOf(o.status);
+  return h(
+    'ol',
+    { class: 'timeline' },
+    STAGES.map((st, i) => {
+      const cls = i < stage || o.status === 'DELIVERED' ? 'done' : i === stage ? 'now' : '';
+      return h(
+        'li',
+        { class: cls },
+        h('span', { class: 'node', 'aria-hidden': 'true' }, cls === 'done' ? '✓' : String(i + 1)),
+        h('span', { class: 'label' }, T(`tl_${st}`)),
+        o.times?.[st] ? h('span', { class: 'time' }, o.times[st]) : null
+      );
+    })
+  );
+}
+
+function paymentCard(o) {
+  const p = o.pay;
+  const accounts = [];
+  if (p.telebirr) accounts.push(copyButton('📱 Telebirr', p.telebirr));
+  if (p.cbeAccount) accounts.push(copyButton('🏦 CBE', p.cbeAccount));
+  if (!accounts.length && p.phone) accounts.push(copyButton(`📞 ${T('shopPhone')}`, p.phone));
+  const guide = h('img', { class: 'guide', src: '/app/payment-guide.png', alt: '', loading: 'lazy' });
+  guide.addEventListener('error', () => guide.remove());
+  const ref = h('input', { id: 'ref', placeholder: T('refHint'), autocomplete: 'off', autocapitalize: 'characters', maxlength: 40 });
+  ref.addEventListener('keydown', (e) => e.key === 'Enter' && sendRef());
+  return h(
+    'div',
+    { class: 'card' },
+    cardTitle('💳', T('paymentTitle')),
+    Number.isFinite(p.amount) ? h('p', { class: 'amount' }, T('payAmount', { amount: money(p.amount) })) : h('p', {}, T('payByShop')),
+    accounts,
+    p.accountName ? h('p', { class: 'note muted' }, `👤 ${T('accountName')}: ${p.accountName}`) : null,
+    h('p', { class: 'note muted' }, T('tapToCopy')),
+    field(T('refLabel'), ref),
+    h('details', {}, h('summary', {}, T('howToPay')), h('p', { class: 'note muted' }, T('howToPayText')), guide)
+  );
+}
+
 function statusScreen() {
   const o = state.order;
-  const stage = STAGES.indexOf(o.status);
-  const kids = [
-    h('p', { class: 'hint' }, o.shopName),
-    h('div', { class: 'status-big' }, T(`st_${o.status}`)),
+  const bad = o.status === 'REJECTED' || o.status === 'CANCELLED';
+  const hero = h(
+    'div',
+    { class: `track-hero${bad ? ' bad' : ''}` },
+    backButton() ? h('div', { style: 'text-align:left;height:38px;position:relative' }, backButton()) : null,
+    h('div', { class: 'id' }, `${o.shopName} · ${o.id}`),
+    h('div', { class: 'emoji', 'aria-hidden': 'true' }, STATUS_EMOJI[o.status] || '📦'),
+    h('h1', {}, T(`st_${o.status}`)),
+    o.eta && !FINAL.has(o.status) ? h('div', { class: 'eta' }, `⏱ ${T('eta', o.eta)}`) : null
+  );
+
+  const payNow = o.status === 'ACCEPTED' && o.pay;
+  const lines = o.lines.map((l) => h('div', { class: 'line' }, h('span', { class: 'what' }, `${l.qty} × ${l.name}`), h('span', {}, money(l.subtotal))));
+  if (o.custom) lines.push(h('div', { class: 'line' }, h('span', { class: 'what' }, `✍️ “${o.custom}”`)));
+  lines.push(h('div', { class: 'line' }, h('span', { class: 'what' }, `🚲 ${T('cashToRider')}`), h('span', {}, money((o.deliveryFee || 0) + (o.serviceFee || 0)))));
+
+  const action = payNow
+    ? bar(T('sendRef'), sendRef)
+    : bar(T('backToShops'), () => {
+        if (FINAL.has(o.status) && state.me) state.me.openOrderId = null;
+        home();
+      });
+
+  return [
+    hero,
+    errorBox(),
+    payNow ? paymentCard(o) : null,
+    o.rider && !FINAL.has(o.status)
+      ? h(
+          'div',
+          { class: 'card' },
+          h(
+            'div',
+            { class: 'rider' },
+            h('div', { class: 'avatar', 'aria-hidden': 'true' }, '🚲'),
+            h('div', { class: 'who' }, h('b', {}, o.rider.name), h('div', { class: 'muted small' }, T('rider'))),
+            o.rider.phone ? h('a', { href: `tel:${o.rider.phone}`, 'aria-label': o.rider.phone }, '📞') : null
+          )
+        )
+      : null,
+    STAGES.includes(o.status) ? h('div', { class: 'card' }, cardTitle('🧭', T('trackTitle')), timeline(o)) : null,
+    h('div', { class: 'card' }, cardTitle('🧾', T('orderDetails')), lines),
+    h('p', { class: 'muted small pad', style: 'margin-top:12px;text-align:center' }, T('chatNote')),
+    action,
   ];
-  if (stage >= 0) kids.push(h('div', { class: 'steps', 'aria-hidden': 'true' }, STAGES.map((_, i) => h('i', { class: i <= stage ? 'on' : '' }))));
-  if (o.eta && !FINAL.has(o.status)) kids.push(h('p', { class: 'hint' }, T('eta', o.eta)));
-
-  let action = null;
-  if (o.status === 'ACCEPTED' && o.pay) {
-    const p = o.pay;
-    const accounts = [];
-    if (p.telebirr) accounts.push(copyButton('📱 Telebirr', p.telebirr));
-    if (p.cbeAccount) accounts.push(copyButton('🏦 CBE', p.cbeAccount));
-    if (!accounts.length && p.phone) accounts.push(copyButton(`📞 ${T('shopPhone')}`, p.phone));
-    const guide = h('img', { class: 'guide', src: '/app/payment-guide.png', alt: '', loading: 'lazy' });
-    guide.addEventListener('error', () => guide.remove());
-    const ref = h('input', { id: 'ref', placeholder: T('refHint'), autocomplete: 'off', autocapitalize: 'characters', maxlength: 40 });
-    ref.addEventListener('keydown', (e) => e.key === 'Enter' && sendRef());
-    kids.push(
-      h(
-        'div',
-        { class: 'panel' },
-        h('p', { class: 'total' }, Number.isFinite(p.amount) ? T('payAmount', { amount: money(p.amount) }) : T('payByShop')),
-        accounts,
-        p.accountName ? h('p', {}, `👤 ${T('accountName')}: ${p.accountName}`) : null,
-        h('p', { class: 'hint' }, T('tapToCopy')),
-        field(T('refLabel'), ref),
-        h('details', {}, h('summary', { class: 'hint' }, T('howToPay')), h('p', { class: 'hint' }, T('howToPayText')), guide)
-      )
-    );
-    action = bar(T('sendRef'), sendRef);
-  }
-  if (o.rider && !FINAL.has(o.status)) {
-    kids.push(h('div', { class: 'panel' }, h('p', {}, `🚲 ${T('rider')}: ${o.rider.name}`), o.rider.phone ? h('a', { href: `tel:${o.rider.phone}` }, `📞 ${o.rider.phone}`) : null));
-  }
-
-  const lines = o.lines.map((l) => h('div', { class: 'line' }, h('span', {}, `${l.qty} × ${l.name}`), h('span', {}, money(l.subtotal))));
-  if (o.custom) lines.push(h('div', { class: 'line' }, h('span', {}, `✍️ “${o.custom}”`)));
-  lines.push(h('div', { class: 'line' }, h('span', {}, `${T('deliveryFee')} + ${T('serviceFee')}`), h('span', {}, money((o.deliveryFee || 0) + (o.serviceFee || 0)))));
-  kids.push(h('div', { class: 'panel' }, lines), h('p', { class: 'hint' }, T('chatNote')));
-
-  if (FINAL.has(o.status) || !action) {
-    action = bar(T('backToShops'), () => {
-      stopPolling();
-      if (FINAL.has(o.status) && state.me) state.me.openOrderId = null;
-      home();
-    });
-  }
-  return [...frame(T('orderTitle', { id: o.id }), ...kids), action];
 }
 
 start();

@@ -33,6 +33,8 @@ seed.menu.forEach((i) => (i.photo = `DEMO_PHOTO_${i.id}`));
 seed.menu[2].photo = ''; // one item without a photo, to see the placeholder
 seed.menu.push({ id: 'I4', merchantId: 'M2', nameEn: 'Macchiato', nameOm: 'Makiyaatoo', nameAm: 'ማኪያቶ', price: 40, active: true, photo: 'DEMO_PHOTO_I4' });
 const store = createMemoryStore(seed);
+// enough reviews for the burger shop to show its rating
+for (let i = 0; i < 6; i++) await store.createReview({ orderId: `DEMO-R${i}`, merchantId: 'M1', foodStars: i === 0 ? 4 : 5 });
 
 const images = createImageCache({ render: () => Buffer.from('png') });
 const { bot, service, checkout, insights } = createBot({ config, store, botInfo: BOT, images, warmImages: false });
@@ -48,21 +50,25 @@ bot.api.config.use(async (_prev, method, payload) => {
   return { ok: true, result: true };
 });
 
-// Demo pictures drawn on the fly (the real ones come from Telegram).
-const COLORS = ['#e07a5f', '#3d405b', '#81b29a', '#f2cc8f', '#6d597a'];
+// Demo pictures drawn on the fly (the real ones come from Telegram): a food emoji on a soft colour.
+const DEMO_ART = {
+  DEMO_BANNER_M1: ['🍔🍟🥤', '#ffb703', '#fb8500'],
+  DEMO_PHOTO_I1: ['🍔', '#ffe8cc', '#ffc078'],
+  DEMO_PHOTO_I2: ['🍟', '#fff3bf', '#ffd43b'],
+  DEMO_PHOTO_I4: ['☕', '#f1e3d3', '#c9a27e'],
+};
 function demoPicture(id) {
   const wide = id.includes('BANNER');
   const [w, hgt] = wide ? [800, 400] : [400, 400];
-  const color = COLORS[[...id].reduce((n, c) => n + c.charCodeAt(0), 0) % COLORS.length];
-  const label = id.replace(/^DEMO_(PHOTO|BANNER)_/, '');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${hgt}"><rect width="100%" height="100%" fill="${color}"/><text x="50%" y="55%" font-family="sans-serif" font-size="${wide ? 90 : 120}" fill="#fff" text-anchor="middle">${label}</text></svg>`;
+  const [art, from, to] = DEMO_ART[id] || ['🍽️', '#e9ecef', '#ced4da'];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${hgt}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="58%" font-size="${wide ? 150 : 200}" text-anchor="middle" dominant-baseline="middle">${art}</text></svg>`;
   return { body: Buffer.from(svg), type: 'image/svg+xml' };
 }
 const photos = { get: async (id) => (id.startsWith('DEMO_') ? demoPicture(id) : null) };
 
 // The page, signed in as demo customer 100 (a real Telegram app gets this from Telegram).
 const initData = signInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 100, first_name: 'Demo', last_name: 'Customer' }) }, TOKEN);
-const staticFiles = loadStaticFiles('webapp', { '/app/payment-guide.png': config.paymentGuidePath });
+const staticFiles = loadStaticFiles('webapp', { '/app/payment-guide.png': config.paymentGuidePath, '/app/logo.png': 'assets/images/logo.png' });
 const page = staticFiles.get('/app/index.html');
 const injected = { ...page, body: Buffer.from(page.body.toString('utf8').replace('<head>', `<head>\n  <script>window.__DEV_INIT_DATA__ = ${JSON.stringify(initData)};</script>`)) };
 for (const p of ['/app', '/app/', '/app/index.html']) staticFiles.set(p, injected);

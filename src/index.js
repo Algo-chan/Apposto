@@ -59,7 +59,7 @@ if (Number.isInteger(port) && port > 0) {
   const health = createHealthHandler({ isRunning: () => !!runner && runner.isRunning() });
   const photos = createPhotoProxy({ api: bot.api, botToken: config.botToken, store });
   const api = createWebApi({ store, config, insights, checkout });
-  const staticFiles = loadStaticFiles('webapp', { '/app/payment-guide.png': config.paymentGuidePath });
+  const staticFiles = loadStaticFiles('webapp', { '/app/payment-guide.png': config.paymentGuidePath, '/app/logo.png': 'assets/images/logo.png' });
   healthServer = http.createServer(createHttpHandler({ health, photos, api, staticFiles, botToken: config.botToken }));
   healthServer.listen(port, '0.0.0.0', () => {
     console.log(`❤️  Health server listening on 0.0.0.0:${port}`);
