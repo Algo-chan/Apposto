@@ -18,6 +18,7 @@ export const TABS = {
     ['lng', 'lng', 'num'],
     ['active', 'active', 'bool'],
     ['prep_min', 'prepMin', 'num'],
+    ['banner', 'banner', 'str'], // Telegram file_id of the shop's banner (sent to the bot by an admin)
   ],
   Menu: [
     ['item_id', 'id', 'str'],
@@ -27,6 +28,7 @@ export const TABS = {
     ['name_am', 'nameAm', 'str'],
     ['price', 'price', 'num'],
     ['active', 'active', 'bool'],
+    ['photo', 'photo', 'str'], // Telegram file_id of the item's photo (sent to the bot by an admin)
   ],
   Riders: [
     ['telegram_id', 'telegramId', 'id'],

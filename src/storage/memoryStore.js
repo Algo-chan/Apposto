@@ -3,6 +3,7 @@
 import { withNames } from './schema.js';
 
 const clone = (v) => (v == null ? v : structuredClone(v));
+const sameId = (a, b) => String(a).trim().toUpperCase() === String(b).trim().toUpperCase();
 
 export function createMemoryStore(seed = {}) {
   const db = {
@@ -30,6 +31,18 @@ export function createMemoryStore(seed = {}) {
     },
     async getRider(tgId) {
       return clone(db.riders.find((r) => r.telegramId === String(tgId)) || null);
+    },
+    async setMenuPhoto(itemId, fileId) {
+      const item = db.menu.find((i) => sameId(i.id, itemId));
+      if (!item) return null;
+      item.photo = fileId;
+      return clone(item);
+    },
+    async setMerchantBanner(merchantId, fileId) {
+      const m = db.merchants.find((x) => sameId(x.id, merchantId));
+      if (!m) return null;
+      m.banner = fileId;
+      return clone(m);
     },
     async getCustomer(tgId) {
       return clone(db.customers.get(String(tgId)) || null);

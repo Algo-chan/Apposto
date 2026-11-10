@@ -123,3 +123,35 @@ test('an up-to-date sheet logs nothing and reports no missing columns', async ()
   }
   assert.deepEqual(createMemoryStore().missingColumns(), {});
 });
+
+test('setMenuPhoto writes the photo cell and the next read sees it', async () => {
+  const { sheets, store } = await setup();
+  try {
+    sheets.Menu.rows.push({ item_id: 'I1', merchant_id: 'M1', name_en: 'Burger', price: 250, active: 'TRUE' });
+    await store.getMenu('M1'); // fills the cache
+    const item = await store.setMenuPhoto('i1', 'FILE1');
+    assert.equal(item.id, 'I1');
+    assert.equal(item.names.en, 'Burger');
+    assert.equal(sheets.Menu.rows[0].photo, 'FILE1');
+    assert.equal((await store.getMenu('M1'))[0].photo, 'FILE1');
+    assert.equal(await store.setMenuPhoto('I9', 'X'), null);
+  } finally {
+    store.close();
+  }
+});
+
+test('setMerchantBanner writes the banner cell and the next read sees it', async () => {
+  const { sheets, store } = await setup();
+  try {
+    sheets.Merchants.rows.push({ merchant_id: 'M1', name_en: 'Burger House', active: 'TRUE' });
+    await store.getMerchant('M1');
+    const m = await store.setMerchantBanner('m1', 'BAN1');
+    assert.equal(m.id, 'M1');
+    assert.equal(m.names.en, 'Burger House');
+    assert.equal(sheets.Merchants.rows[0].banner, 'BAN1');
+    assert.equal((await store.getMerchant('M1')).banner, 'BAN1');
+    assert.equal(await store.setMerchantBanner('M9', 'X'), null);
+  } finally {
+    store.close();
+  }
+});

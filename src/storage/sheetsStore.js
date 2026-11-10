@@ -173,6 +173,28 @@ export async function createSheetsStore(config, { doc: openDoc, log = console.wa
   const menu = () => cached('Menu', withNames);
   const riders = () => cached('Riders');
 
+  /**
+   * Write one field of the row whose id matches (any case) in a hand-edited tab, then drop that
+   * tab's cache. Reads the rows fresh, so a row added by hand a moment ago is found.
+   * Returns the updated record (with names), or null when no row has that id.
+   */
+  async function setCell(name, id, patch) {
+    const wanted = String(id).trim().toUpperCase();
+    const updated = await withRetry(
+      async () => {
+        const rows = await readRows(name);
+        const hit = rows.find(({ data }) => String(data.id).trim().toUpperCase() === wanted);
+        if (!hit) return null;
+        hit.handle.assign(toRow(name, patch));
+        await hit.handle.save({ raw: true });
+        return { ...hit.data, ...patch };
+      },
+      { label: `${name} ${id} save` }
+    );
+    cache.delete(name);
+    return updated && withNames(updated);
+  }
+
   return {
     kind: 'sheets',
     async getMerchants() {
@@ -189,6 +211,14 @@ export async function createSheetsStore(config, { doc: openDoc, log = console.wa
     },
     async getRider(tgId) {
       return (await riders()).find((r) => r.telegramId === String(tgId)) || null;
+    },
+    /** The item's photo (Telegram file_id). Id matched in any case; null when there is no such item. */
+    setMenuPhoto(itemId, fileId) {
+      return setCell('Menu', itemId, { photo: fileId });
+    },
+    /** The shop's banner (Telegram file_id). Id matched in any case; null when there is no such shop. */
+    setMerchantBanner(merchantId, fileId) {
+      return setCell('Merchants', merchantId, { banner: fileId });
     },
     async getCustomer(tgId) {
       return customers.get(String(tgId));
