@@ -217,12 +217,12 @@ test('payment ref: moves to PAYMENT_SUBMITTED; bad ref; used ref; too early', as
 test('me: language, saved phone and the open order', async () => {
   const { call, orderBody, store } = setup();
   let me = await call('GET', '/api/me');
-  assert.deepEqual(me.body, { firstName: 'Abebe', lang: null, phone: '', openOrderId: null });
+  assert.deepEqual(me.body, { brand: 'Delivery', firstName: 'Abebe', lang: null, phone: '', openOrderId: null });
   assert.deepEqual((await call('POST', '/api/lang', { lang: 'om' })).body, { ok: true });
   assert.equal((await call('POST', '/api/lang', { lang: 'xx' })).body.error, 'BAD_REQUEST');
   const { orderId } = (await call('POST', '/api/orders', orderBody())).body;
   me = await call('GET', '/api/me');
-  assert.deepEqual(me.body, { firstName: 'Abebe', lang: 'om', phone: '0911234567', openOrderId: orderId });
+  assert.deepEqual(me.body, { brand: 'Delivery', firstName: 'Abebe', lang: 'om', phone: '0911234567', openOrderId: orderId });
   assert.equal((await store.getCustomer('100')).lang, 'om');
 });
 

@@ -79,7 +79,7 @@ export function createWebApi({ store, config, insights, checkout, now = () => Da
     const open = (await store.listOrders({ customerId: user.id }))
       .filter((o) => !FINAL.has(o.status))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return { firstName: user.firstName, lang: c?.lang || null, phone: c?.phone || '', openOrderId: open[0]?.id ?? null };
+    return { brand: config.brandName, firstName: user.firstName, lang: c?.lang || null, phone: c?.phone || '', openOrderId: open[0]?.id ?? null };
   }
 
   async function setLang(user, body) {
