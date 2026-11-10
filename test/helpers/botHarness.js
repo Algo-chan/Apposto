@@ -41,7 +41,7 @@ export function setup({ failPhoto = false, failDelete = false, realImages = fals
     ? () => new Promise((r) => setTimeout(() => r(Buffer.from('png')), slowRenderMs))
     : () => Buffer.from('png');
   const images = realImages ? undefined : createImageCache({ render: fakeRender });
-  const { bot, tracker } = createBot({ config, store, botInfo: BOT, images, warmImages: false });
+  const { bot, tracker, checkout, insights } = createBot({ config, store, botInfo: BOT, images, warmImages: false });
   const calls = [];
   const blocked = new Set(); // chat ids that never pressed Start
   let mid = 5000;
@@ -138,5 +138,5 @@ export function setup({ failPhoto = false, failDelete = false, realImages = fals
     return cardsTo(chatId).map((c) => c.result.message_id).filter((m) => !gone.has(m));
   };
 
-  return { bot, store, calls, blocked, failOnce, text, send, tap, sentTo, photosTo, outTo, lastTo, lastAlert, buttons, lastEdit, order, latestOrder, placeOrder, config, tracker, cardsTo, deletedIn, liveCards };
+  return { bot, store, calls, blocked, failOnce, text, send, tap, sentTo, photosTo, outTo, lastTo, lastAlert, buttons, lastEdit, order, latestOrder, placeOrder, config, tracker, checkout, insights, cardsTo, deletedIn, liveCards };
 }

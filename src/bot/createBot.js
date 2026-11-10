@@ -6,6 +6,7 @@ import { createNotifier } from './notify.js';
 import { registerOps } from './ops.js';
 import { registerCustomer } from './customer.js';
 import { registerPhotos } from './photos.js';
+import { createCheckoutFlow } from './checkoutFlow.js';
 import { createInsights } from './insights.js';
 import { registerReviews } from './reviews.js';
 import { t, LANGS } from '../i18n.js';
@@ -44,7 +45,8 @@ export function createBot({ config, store, botInfo, now, images, warmImages = tr
   const notify = createNotifier({ api: bot.api, store, config, images });
   const insights = createInsights({ store, config });
   const tracker = createTracker({ api: bot.api, store, notify, config, insights });
-  const deps = { store, service, config, notify, insights, tracker };
+  const checkout = createCheckoutFlow({ store, service, notify, tracker });
+  const deps = { store, service, config, notify, insights, tracker, checkout };
 
   bot.api.config.use(telegramRetry());
 
@@ -91,5 +93,5 @@ export function createBot({ config, store, botInfo, now, images, warmImages = tr
     }
   });
 
-  return { bot, service, notify, tracker };
+  return { bot, service, notify, tracker, checkout, insights };
 }

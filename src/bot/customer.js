@@ -12,7 +12,6 @@ import {
   normalizePhone,
   normalizeRef,
   cleanText,
-  formatMoney,
   localTimestamp,
   parseLatLng,
 } from '../core/orders.js';
@@ -24,9 +23,6 @@ import {
   merchantsKeyboard,
   renderMenu,
   renderSummary,
-  itemLines,
-  foodText,
-  distanceText,
   progressLine,
 } from './ui.js';
 import { replyError, appendLine } from './notify.js';
@@ -34,7 +30,7 @@ import { th, HTML } from './html.js';
 
 const L = (ctx) => ctx.session.lang || 'en';
 
-export function registerCustomer(bot, { store, service, config, notify, insights, tracker }) {
+export function registerCustomer(bot, { store, service, config, notify, insights, tracker, checkout }) {
   const pm = bot.chatType('private');
 
   // ---------- helpers ----------
@@ -345,8 +341,8 @@ export function registerCustomer(bot, { store, service, config, notify, insights
 
   pm.callbackQuery('confirm', async (ctx) => {
     const lang = L(ctx);
-    const { cart, checkout, step } = ctx.session;
-    if (step !== 'confirm' || !cart || !checkout?.phone) {
+    const { cart, checkout: details, step } = ctx.session;
+    if (step !== 'confirm' || !cart || !details?.phone) {
       // a second tap on the summary that already became an order: ignore it quietly
       const mid = ctx.callbackQuery.message?.message_id;
       if (mid !== undefined && mid === ctx.session.placedFrom) return ctx.answerCallbackQuery();
@@ -361,49 +357,18 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     await ctx.answerCallbackQuery({ text: '⏳' });
 
     const customer = { id: ctx.from.id, name: customerName(ctx.from), lang };
-    const order = await service.placeOrder({ customer, merchant, summary, checkout });
     ctx.session.placedFrom = ctx.callbackQuery.message?.message_id;
     resetFlow(ctx);
-    // The order exists now: a failure saving the customer's details must not stop the shop
-    // from being told about it.
-    try {
-      await store.saveCustomer({ id: String(ctx.from.id), name: customer.name, phone: checkout.phone, lang });
-    } catch (err) {
-      console.error(`save customer ${ctx.from.id} failed: ${err.message}`);
-    }
-
-    await appendLine(ctx, `📨 ${order.id}`);
-
-    // Notify the shop (in the shop's language) with Accept / Reject
-    const mLang = merchant.lang || 'en';
-    const mSummary = summarizeCart(cart, menuById, mLang);
-    const kb = new InlineKeyboard()
-      .text(t(mLang, 'btnAccept'), `macc:${order.id}`)
-      .text(t(mLang, 'btnReject'), `mrej:${order.id}`);
-    await notify.toMerchant(
-      merchant,
-      'mNewOrder',
-      { id: order.id, items: itemLines(mSummary, mLang), food: foodText(mSummary, mLang, true), landmark: order.landmark },
-      { other: { reply_markup: kb }, fallback: true }
-    );
-
-    // Tell the dispatch group
-    await notify.dispatch(
-      [
-        `🆕 ${order.id} · ${merchant.names.en}`,
-        itemLines(summarizeCart(cart, menuById, 'en'), 'en'),
-        `👤 ${order.customerName} ${order.customerPhone}`,
-        `🏠 ${order.landmark}${distanceText(order.distanceKm)}`,
-        `🚲 ${formatMoney(order.deliveryFee)} + ${formatMoney(order.serviceFee)} service`,
-      ].join('\n'),
-      { reply_markup: new InlineKeyboard().text('❌ Cancel (admin)', `acancel:${order.id}`) }
-    );
-
-    // Headline (with the bottom menu back) + the first live card. Not awaited and sent last: a
-    // slow first render must not hold up the shop or the dispatch group.
+    // the "order placed" headline brings the bottom menu back
     ctx.session.menuShown = true;
-    const placed = th(lang, 'orderPlaced', { id: order.id, merchant: merchant.names[lang] });
-    void tracker.update(order, { headline: { text: placed, other: { reply_markup: mainMenu(lang) } } });
+    await checkout.placeAndNotify({
+      customer,
+      merchant,
+      cart,
+      checkout: details,
+      headlineMarkup: mainMenu(lang),
+      onPlaced: (order) => appendLine(ctx, `📨 ${order.id}`),
+    });
   });
 
   // ---------- my orders & cancel ----------
@@ -537,27 +502,16 @@ export function registerCustomer(bot, { store, service, config, notify, insights
     const ref = normalizeRef(text);
     if (!ref) return ctx.reply(t(lang, 'badRef'));
 
-    let order;
     try {
-      order = await service.submitPayment(awaiting[0].id, ctx.from.id, ref);
+      await checkout.submitRefAndNotify({
+        orderId: awaiting[0].id,
+        customerId: ctx.from.id,
+        ref,
+        onSubmitted: () => ctx.reply(t(lang, 'refReceived'), HTML),
+      });
     } catch (err) {
       return replyError(ctx, err, lang);
     }
-    await ctx.reply(t(lang, 'refReceived'), HTML);
-
-    const merchant = await store.getMerchant(order.merchantId);
-    const mLang = merchant.lang || 'en';
-    const kb = new InlineKeyboard()
-      .text(t(mLang, 'btnPaid'), `mpay:${order.id}`)
-      .row()
-      .text(t(mLang, 'btnNotPaid'), `mnopay:${order.id}`);
-    await notify.toMerchant(
-      merchant,
-      'mCheckPayment',
-      { id: order.id, food: formatMoney(order.foodTotal), ref },
-      { other: { reply_markup: kb }, fallback: true }
-    );
-    await notify.dispatch(`💳 ${order.id}: customer sent ref ${ref} for ${formatMoney(order.foodTotal)}`);
   }
 }
 
